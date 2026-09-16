@@ -1,10 +1,11 @@
 import { draw } from "./pose.js";
 import { ANGLES, POSITIONS, LABELS, evaluate, sampleValue } from "./experiment-math.js";
+import { gaugeVariables, gaugeState } from "./gauge.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const colors = ["#c9ff39", "#66e1ef", "#ff9c70"];
-const DEFAULTS = { timing: "concurrent", type: "KP", amount: "detailed", camera: "on", skeletonWidth: 3, markerSize: 3, angleSide: "left", positionSide: "midpoint", angles: ["knee", "hip", "trunk"], positions: [], visuals: { numeric: true, skeleton: true, trajectory: false, waveform: false, target: false }, targets: Object.fromEntries(ANGLES.map(key => [key, { enabled: key === "knee", value: key === "knee" ? 90 : 30, tolerance: 5 }])) };
+const DEFAULTS = { timing: "concurrent", type: "KP", amount: "detailed", camera: "on", gaugeDirection: "horizontal", skeletonWidth: 3, markerSize: 3, angleSide: "left", positionSide: "midpoint", angles: ["knee", "hip", "trunk"], positions: [], visuals: { numeric: true, skeleton: true, trajectory: false, waveform: false, gauge: false, target: false }, targets: Object.fromEntries([...ANGLES.map(key => [key, { enabled: key === "knee", value: key === "knee" ? 90 : 30, tolerance: 5 }]), ...POSITIONS.flatMap(name => ["x", "y"].map(axis => [`${name}.${axis}`, { enabled: false, value: .5, tolerance: .05 }]))]) };
 const ANGLE_POINTS = { knee: [23, 25, 27], hip: [11, 23, 25], ankle: [25, 27, 31] };
 const format = value => Number.isFinite(value) ? value.toFixed(1) : "—";
 const csvCell = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -17,17 +18,19 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
   const angleChecks = ANGLES.map(key => `<label><input type="checkbox" data-angle="${key}" ${settings.angles.includes(key) ? "checked" : ""}>${LABELS[key] || key}</label>`).join("");
   const positionChecks = POSITIONS.map(key => `<label><input type="checkbox" data-position="${key}">${LABELS[key] || key}</label>`).join("");
   const targetInputs = ANGLES.map(key => `<label><input type="checkbox" data-target-enabled="${key}" ${settings.targets[key].enabled ? "checked" : ""}>${LABELS[key] || key}<input type="number" data-target-value="${key}" value="${settings.targets[key].value}" aria-label="${key} target">±<input type="number" min="0" data-target-tolerance="${key}" value="5" aria-label="${key} tolerance">°</label>`).join("");
+  const positionTargetInputs = POSITIONS.flatMap(name => ["x", "y"].map(axis => `<label data-position-target="${name}" hidden><input type="checkbox" data-target-enabled="${name}.${axis}">${LABELS[name] || name} ${axis.toUpperCase()}<input type="number" min="0" max="1" step="0.01" data-target-value="${name}.${axis}" value="0.5" aria-label="${name} ${axis} target">±<input type="number" min="0" max="1" step="0.01" data-target-tolerance="${name}.${axis}" value="0.05" aria-label="${name} ${axis} tolerance"></label>`)).join("");
   $(".workspace").insertAdjacentHTML("afterend", `<section class="experiment-panel" aria-label="Visual Biofeedback設定"><h2>FEEDBACK / 実験設定</h2><div class="camera-display-control"><span>LIVE CAMERA VIDEO</span><div class="experiment-tabs" data-group="camera"><button type="button" data-value="on" class="active">映像 ON</button><button type="button" data-value="off">映像 OFF</button></div><small>映像OFFでも選択したFBを表示し、カメラ入力・Pose推定・録画は継続します。Skeletonは独立して切り替えます。</small></div><div class="experiment-grid">
     <fieldset><legend>WHEN / Timing</legend><div class="experiment-tabs" data-group="timing"><button type="button" data-value="none">No BF</button><button type="button" data-value="concurrent" class="active">Concurrent</button><button type="button" data-value="terminal">Terminal</button></div></fieldset>
     <fieldset><legend>WHAT / Feedback Type</legend><div class="experiment-tabs" data-group="type"><button type="button" data-value="KR">KR / 結果</button><button type="button" data-value="KP" class="active">KP / 過程</button></div></fieldset>
     <fieldset><legend>HOW MUCH / Amount</legend><div class="experiment-tabs" data-group="amount"><button type="button" data-value="simple">Simple</button><button type="button" data-value="detailed" class="active">Detailed</button></div></fieldset>
-  </div><details open><summary>Variables / 計測変数</summary><div class="experiment-grid"><fieldset><legend>ANGLES</legend>${angleChecks}<div><label>角度の側 <select id="angleSide"><option value="left">Left</option><option value="right">Right</option></select></label></div></fieldset><fieldset><legend>POSITIONS (normalized 0–1)</legend>${positionChecks}<div><label>位置の側 <select id="positionSide"><option value="midpoint">Midpoint</option><option value="left">Left</option><option value="right">Right</option></select></label></div></fieldset><fieldset><legend>HOW / Visualization</legend>${["numeric", "skeleton", "trajectory", "waveform", "target"].map(key => `<label><input type="checkbox" data-visual="${key}" ${settings.visuals[key] ? "checked" : ""}>${key}</label>`).join("")}<div class="display-levels"><label>Skeleton line width <input type="range" min="1" max="5" step="1" value="3" data-level="skeletonWidth"><output data-level-output="skeletonWidth">3</output></label><label>Joint marker size <input type="range" min="1" max="5" step="1" value="3" data-level="markerSize"><output data-level-output="markerSize">3</output></label></div><small id="visualHint">TrajectoryはPosition選択時に利用可能</small></fieldset></div></details>
-  <details><summary>Target / 仮説に基づく目標値</summary><div class="experiment-target-grid">${targetInputs}</div><small>固定の「正解」ではありません。選択した角度を各視点の深い位置の値と比較します。</small></details></section>`);
+  </div><details open><summary>Variables / 計測変数</summary><div class="experiment-grid"><fieldset><legend>ANGLES</legend>${angleChecks}<div><label>角度の側 <select id="angleSide"><option value="left">Left</option><option value="right">Right</option></select></label></div></fieldset><fieldset><legend>POSITIONS (normalized 0–1)</legend>${positionChecks}<div><label>位置の側 <select id="positionSide"><option value="midpoint">Midpoint</option><option value="left">Left</option><option value="right">Right</option></select></label></div></fieldset><fieldset><legend>HOW / Visualization</legend>${["numeric", "skeleton", "trajectory", "waveform", "gauge", "target"].map(key => `<label><input type="checkbox" data-visual="${key}" ${settings.visuals[key] ? "checked" : ""}>${key}</label>`).join("")}<label>Gauge direction <select id="gaugeDirection"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label><div class="display-levels"><label>Skeleton line width <input type="range" min="1" max="5" step="1" value="3" data-level="skeletonWidth"><output data-level-output="skeletonWidth">3</output></label><label>Joint marker size <input type="range" min="1" max="5" step="1" value="3" data-level="markerSize"><output data-level-output="markerSize">3</output></label></div><small id="visualHint">TrajectoryはPosition選択時に利用可能</small></fieldset></div></details>
+  <details><summary>Target / 仮説に基づく目標値</summary><div class="experiment-target-grid">${targetInputs}</div><div class="experiment-target-grid position-targets">${positionTargetInputs}</div><small>Gaugeは現在値と設定した目標±許容幅を表示します。Positionの目標は画像内の正規化座標0–1です。固定の「正解」ではありません。</small></details></section>`);
   $(".remote-record").insertAdjacentHTML("afterend", `<section class="trial-panel"><div class="trial-head"><h2>TRIALS / REPLAY</h2><small id="trialStorage">0 Trial · 0 KB / 500 MB</small></div><div id="trialHistory" class="trial-history">まだTrialはありません</div><p id="trialSummary" class="trial-summary">録画開始〜停止が1 Trialです。データはこのブラウザのメモリに保持され、ページを閉じると消去されます。</p><div class="trial-actions"><button id="exportTrial" type="button" disabled>選択Trial CSV</button><button id="exportAllTrials" type="button" disabled>全Trial CSV</button><button id="deleteAllTrials" type="button" disabled>全Trialを削除</button></div></section>`);
   document.body.insertAdjacentHTML("beforeend", `<section id="experimentReplay" class="replay-modal" role="dialog" aria-label="Trial Replay" hidden><div class="replay-head"><h2 id="replayTitle">Trial Replay</h2><button id="closeExperimentReplay" type="button">閉じる ×</button></div><div class="replay-options">${["video", "skeleton", "trajectory", "numeric", "waveform", "target"].map(key => `<label><input type="checkbox" data-replay-option="${key}" ${["video", "skeleton", "numeric", "waveform", "target"].includes(key) ? "checked" : ""}>${key}</label>`).join("")}</div><details><summary>Replay変数を選択</summary><div class="replay-options">${ANGLES.map(key => `<label><input type="checkbox" data-replay-angle="${key}">${LABELS[key] || key}</label>`).join("")}${POSITIONS.map(key => `<label><input type="checkbox" data-replay-position="${key}">${LABELS[key] || key} position</label>`).join("")}</div></details><div class="replay-grid">${["front", "side"].map(name => `<div class="replay-view" data-replay-view="${name}"><strong>${name.toUpperCase()}</strong><div class="replay-viewport"><video playsinline muted></video><canvas></canvas></div><div class="replay-values"></div></div>`).join("")}</div><div class="replay-controls"><button id="replayPlay" type="button">▶ Play</button><input id="replaySeek" type="range" min="0" max="1000" value="0" aria-label="Replay Seek"><span id="replayTime">0.0 s</span><label>Speed <select id="replaySpeed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option></select></label></div><div class="replay-wave"><canvas data-replay-wave="front"></canvas><canvas data-replay-wave="side"></canvas></div></section>`);
   for (const view of Object.values(views)) {
     $(".viewport", view.root).insertAdjacentHTML("beforeend", '<div class="experiment-target" hidden></div>');
     $(".viewport", view.root).insertAdjacentHTML("afterend", `<div class="experiment-wave" hidden><small>${view.root.dataset.view.toUpperCase()} / Time-series</small><canvas data-wave="${view.root.dataset.view}"></canvas></div>`);
+    $(".experiment-wave", view.root).insertAdjacentHTML("beforebegin", '<div class="experiment-gauges" hidden></div>');
     $(".metrics", view.root).insertAdjacentHTML("afterend", '<div class="experiment-values"></div>');
   }
 
@@ -45,6 +48,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     if (!settings.angles.length) { target.checked = false; settings.visuals.target = false; }
     $("#visualHint").textContent = `Trajectory: ${positionAvailable ? "選択したPosition" : "Positionを選択してください"} / Waveform: 最大3系列`;
     $$(".experiment-wave").forEach(root => root.hidden = !(liveVisible() && settings.type === "KP" && settings.visuals.waveform && settings.amount === "detailed" && chosenVariables().length));
+    $$('[data-position-target]').forEach(row => row.hidden = !settings.positions.includes(row.dataset.positionTarget));
     Object.values(views).forEach(view => {
       view.root.classList.toggle("feedback-suppressed", !liveVisible());
       view.root.classList.toggle("camera-video-off", settings.camera === "off");
@@ -61,7 +65,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     if (el.dataset.angle) settings.angles = $$('[data-angle]:checked').map(input => input.dataset.angle);
     if (el.dataset.position) settings.positions = $$('[data-position]:checked').map(input => input.dataset.position);
     if (el.dataset.visual) settings.visuals[el.dataset.visual] = el.checked;
-    if (el.id === "angleSide" || el.id === "positionSide") settings[el.id] = el.value;
+    if (["angleSide", "positionSide", "gaugeDirection"].includes(el.id)) settings[el.id] = el.value;
     if (el.dataset.targetEnabled) settings.targets[el.dataset.targetEnabled].enabled = el.checked;
     if (el.dataset.targetValue) settings.targets[el.dataset.targetValue].value = +el.value;
     if (el.dataset.targetTolerance) settings.targets[el.dataset.targetTolerance].tolerance = Math.max(0, +el.value);
@@ -148,6 +152,41 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       if (settings.visuals.numeric) label(`${LABELS[key] || key} X${format(position.x)} Y${format(position.y)}`, x + 18, y + 18, color);
     });
   }
+  function renderGauges(view, entry) {
+    const root = $(".experiment-gauges", view.root);
+    const variables = gaugeVariables(settings);
+    root.hidden = !(liveVisible() && settings.type === "KP" && settings.visuals.gauge && variables.length);
+    if (root.hidden) return;
+    root.dataset.direction = settings.gaugeDirection;
+    const signature = variables.join("|");
+    if (root.dataset.variables !== signature) {
+      root.dataset.variables = signature;
+      root.replaceChildren();
+      for (const key of variables) {
+        const card = document.createElement("div"); card.className = "gauge-card"; card.dataset.key = key;
+        card.innerHTML = '<div class="gauge-heading"><strong></strong><span class="gauge-value"></span></div><div class="gauge-track" role="meter"><div class="gauge-fill"></div><div class="gauge-band"></div><div class="gauge-target"></div><div class="gauge-thumb"></div></div><div class="gauge-caption"><span class="gauge-status"></span><span class="gauge-goal"></span></div>';
+        root.append(card);
+      }
+    }
+    for (const card of $$(".gauge-card", root)) {
+      const key = card.dataset.key, gauge = gaugeState(entry, key, settings.targets[key]);
+      $(".gauge-heading strong", card).textContent = gauge.label;
+      $(".gauge-value", card).textContent = settings.visuals.numeric && gauge.valid ? `${format(gauge.value)}${gauge.unit}` : "";
+      const track = $(".gauge-track", card);
+      track.style.setProperty("--current", `${gauge.currentPercent}%`);
+      track.style.setProperty("--target", `${gauge.targetPercent}%`);
+      track.style.setProperty("--band-start", `${gauge.bandStart}%`);
+      track.style.setProperty("--band-size", `${gauge.bandEnd - gauge.bandStart}%`);
+      track.setAttribute("aria-label", `${gauge.label} ${gauge.valid ? format(gauge.value) + gauge.unit : "未検出"}`);
+      track.setAttribute("aria-valuemin", "0"); track.setAttribute("aria-valuemax", String(gauge.max));
+      if (gauge.valid) track.setAttribute("aria-valuenow", String(gauge.value)); else track.removeAttribute("aria-valuenow");
+      card.classList.toggle("has-target", gauge.targetEnabled);
+      card.classList.toggle("inside", gauge.inside);
+      card.classList.toggle("no-value", !gauge.valid);
+      $(".gauge-status", card).textContent = !gauge.valid ? "Pose待ち" : !gauge.targetEnabled ? "目標未設定" : gauge.inside ? "目標範囲内" : gauge.value < gauge.targetValue - gauge.tolerance ? "目標より低い" : "目標より高い";
+      $(".gauge-goal", card).textContent = gauge.targetEnabled ? settings.visuals.numeric ? `Target ${format(gauge.targetValue)}±${format(gauge.tolerance)}${gauge.unit}` : "Target zone" : "";
+    }
+  }
   function decorate(view, state) {
     const canvas = view.canvas, ctx = canvas.getContext("2d"); ctx.clearRect(0, 0, canvas.width, canvas.height);
     const recent = live[view.root.dataset.view], entry = recent.at(-1), points = state.landmarks || entry?.landmarks;
@@ -157,6 +196,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       bar.style.width = `${Math.max(0, Math.min(100, key === "trunk" ? number * 2 : number / 1.8))}%`;
     }
     const display = liveVisible(), detailed = settings.amount === "detailed", kp = settings.type === "KP";
+    renderGauges(view, entry);
     if (display && settings.visuals.skeleton && points) draw(canvas, points, { lineLevel: settings.skeletonWidth, markerLevel: settings.markerSize });
     if (display && kp && entry) drawSelectedVariables(ctx, entry, view);
     if (display && kp && detailed && settings.visuals.trajectory && entry) drawTrail(ctx, recent, entry.t);

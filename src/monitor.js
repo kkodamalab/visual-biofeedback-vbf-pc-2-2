@@ -41,6 +41,27 @@ export function paint(name, settings, sourceBridge = bridge) {
   target.classList.toggle("outside", !!originTarget?.classList.contains("outside"));
   const values = $(".monitor-values", root), originValues = $(".experiment-values", source.root);
   values.textContent = originValues?.hidden ? "" : originValues?.textContent || "";
+  const gauges = $(".monitor-gauges", root), originGauges = $(".experiment-gauges", source.root);
+  if (gauges) {
+    gauges.hidden = !originGauges || originGauges.hidden;
+    if (!gauges.hidden) {
+      gauges.dataset.direction = originGauges.dataset.direction;
+      if (gauges.dataset.variables !== originGauges.dataset.variables) {
+        gauges.dataset.variables = originGauges.dataset.variables;
+        gauges.replaceChildren(...[...originGauges.children].map(card => card.cloneNode(true)));
+      }
+      for (let i = 0; i < originGauges.children.length; i++) {
+        const from = originGauges.children[i], to = gauges.children[i];
+        to.className = from.className;
+        for (const selector of [".gauge-value", ".gauge-status", ".gauge-goal"]) $(selector, to).textContent = $(selector, from).textContent;
+        const fromTrack = $(".gauge-track", from), toTrack = $(".gauge-track", to);
+        toTrack.style.cssText = fromTrack.style.cssText;
+        for (const name of ["aria-label", "aria-valuenow", "aria-valuemin", "aria-valuemax"]) {
+          if (fromTrack.hasAttribute(name)) toTrack.setAttribute(name, fromTrack.getAttribute(name)); else toTrack.removeAttribute(name);
+        }
+      }
+    }
+  }
   const wave = $(".monitor-wave", root), originWave = $(".experiment-wave", source.root);
   wave.hidden = !originWave || originWave.hidden;
   if (!wave.hidden) {

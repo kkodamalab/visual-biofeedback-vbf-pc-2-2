@@ -34,7 +34,7 @@ python -m http.server 4173
 
 ## 簡易テスト
 
-`node --test tests/experiment-math.test.mjs`で計測式を確認できます。`/tests/experiment-fixture.html`は合成Poseで変数ON/OFF即時描画、映像／Skeletonの独立切替、線幅・点サイズ、各視点直下の波形、複数Trial・過去Trial Replay・No BF・Seek・10件上限をブラウザ検証します。`/tests/monitor-fixture.html`は既存Canvas・数値・Target・波形のMonitor描画と表示モードを検証します。実カメラ／2台WebRTC／0.5×は使用端末で確認してください。
+`node --test tests/experiment-math.test.mjs tests/gauge.test.mjs`で計測式とゲージの目標範囲判定を確認できます。`/tests/experiment-fixture.html`は合成Poseで変数ON/OFF即時描画、映像／Skeletonの独立切替、線幅・点サイズ、各視点直下の波形・ゲージ、複数Trial・過去Trial Replay・No BF・Seek・10件上限をブラウザ検証します。`/tests/monitor-fixture.html`は既存Canvas・数値・Target・波形・ゲージのMonitor描画と表示モードを検証します。実カメラ／2台WebRTC／0.5×は使用端末で確認してください。
 
 ## 実装済み機能
 
@@ -64,6 +64,7 @@ python -m http.server 4173
 - Concurrentでは選択した角度だけを関節の弧・基準線・数値、選択したPositionだけをマーカー・座標として映像上へ重ねます。チェックの変更は即時反映され、基本スケルトンは独立表示です。
 - Live Camera VideoをON/OFF可能。OFFは映像の表示だけを隠し、カメラ入力・Pose推定・録画を継続します。QRはA/Bを離した独立カードです。
 - 映像とSkeletonを独立切替。Skeleton線幅・Joint marker sizeはそれぞれ共通5段階（初期3）。選択した最大3系列の波形は各視点の映像直下に表示し、OFF時は領域を消します。
+- GaugeをONにすると、選択した全Angle／Position X・Yの現在値をFront／Side別に横または縦のバーで表示。目標を有効にした変数はTarget線と許容範囲を重ね、「目標範囲内／高い／低い」を表示します。Positionの目標は0–1で設定可能。未設定の変数は「目標未設定」と示し、達成扱いにしません。Monitorにも同期します。
 - 投影専用Monitor Viewを別Window／Tabで開き、Dual／Front Only／Side OnlyとFullscreenを切替。Dashboardの描画済みCanvas・既存videoを同一originで読み取り、Target・数値・波形・Coachを表示します。設定変更はBroadcastChannelでも通知します。Monitor側ではカメラ取得・Pose推定・録画を行いません。
 - ユーザー指定のAngle Target／Toleranceを複数設定。Concurrentは映像上の値・差とTarget zone、Terminalは終了後のReplay・波形・結果要約で比較します。
 - 録画開始〜停止を1 Trialとして映像・正規化Landmark・5角度・7位置・設定・時刻をメモリに保持。最大10 Trialまたは概ね500 MB（最新Trialは保持）。個別／全削除、任意のTrialをPlay／Pause／Seek／速度変更、動画・Skeleton・軌跡・数値・波形の切替、波形クリックSeek、Trial／全Trial CSV、各映像Download。
@@ -77,6 +78,7 @@ python -m http.server 4173
 - 角度は映像縦横比でX軸を補正した2D投影角です。Knee=股関節–膝–足首、Hip=肩–股関節–膝、Ankle=膝–足首–足先の内角、Trunk=肩–股関節線と画面鉛直のなす鋭角、Head/Neck=耳–肩線と画面鉛直のなす鋭角です。Left／Rightを選べます。カメラ向きによって投影角が変化します。
 - PositionはHead（耳）、Shoulder、Hip、Knee、Ankle、Wrist、Foot indexのLeft／Right／Midpointの画像内正規化座標0–1です。実寸cmではありません。CSVに全33 Landmark座標も保存します。
 - KRはユーザー設定TargetとTrialの最深部（選択側のKnee角度が最小のフレーム）および所要時間の要約、KPは経過中の値・軌跡・波形を示します。Depth%は膝角度からの簡易表示で、競技判定や医学的基準ではありません。
+- Live GaugeはConcurrent・KPで表示し、Target±Toleranceの範囲内を「到達」として示します。数値の大小だけで動作の良否を判定するものではありません。Positionゲージの目標は画像内座標であり、実空間位置ではありません。
 - Trialはタブのメモリ内のみです。リロード／閉じると消えます。残したい試技はCSVと映像をダウンロードしてください。グループ間の共有DBはありません。録画は最大5分または約450 MBで自動停止し、Historyは最大10 Trial・概ね500 MBで古いものから解放します。
 - Remoteの映像とPoseデータはWebRTCで別々に到着するため、Replayの動画と波形には通信遅延程度のずれがあり得ます。ハードウェア同期ではありません。
 - 角度と左右差は2D投影上の簡易指標です。3D再構成・カメラ校正・競技判定は行いません。
