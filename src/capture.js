@@ -76,6 +76,11 @@ async function start() {
     await new Promise((resolve, reject) => { peer.on("open", resolve); peer.on("error", reject); });
     call = peer.call(target, stream, { metadata: { source, sessionId } });
     conn = peer.connect(target, { reliable: false, metadata: { source, sessionId } });
+    conn.on("data", message => {
+      if (message.type !== "feedback") return;
+      root.classList.toggle("feedback-suppressed", !message.visible);
+      if (!message.visible) canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    });
     conn.on("open", () => {
       $("#statusDot").classList.add("active");
       $("#systemStatus").textContent = `Smartphone ${source} · ${facing === "user" ? "インカメラ" : lens === "ultra" ? "0.5× Ultra Wide" : "背面カメラ"}をPCへ送信中`;

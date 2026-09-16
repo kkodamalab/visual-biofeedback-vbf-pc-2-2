@@ -1,0 +1,39 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><link rel="stylesheet" href="../src/styles.css"><link rel="stylesheet" href="../src/experiment.css"></head><body>
+<div class="workspace">
+<article class="camera-panel" data-view="front"><div class="viewport"><video></video><canvas></canvas></div><div class="metrics"><strong data-metric="knee"></strong><i data-bar="knee"></i><strong data-metric="hip"></strong><i data-bar="hip"></i><strong data-metric="trunk"></strong><i data-bar="trunk"></i></div></article>
+<article class="camera-panel" data-view="side"><div class="viewport"><video></video><canvas></canvas></div><div class="metrics"><strong data-metric="knee"></strong><i data-bar="knee"></i><strong data-metric="hip"></strong><i data-bar="hip"></i><strong data-metric="trunk"></strong><i data-bar="trunk"></i></div></article>
+</div><div class="remote-record"></div><p id="result">RUNNING</p>
+<script type="module">
+import { createExperiment } from "../src/experiment.js";
+try {
+  const views = Object.fromEntries(["front", "side"].map(name => {
+    const root = document.querySelector(`[data-view=${name}]`);
+    return [name, { root, video: root.querySelector("video"), canvas: root.querySelector("canvas"), source: name === "front" ? "A" : "B" }];
+  }));
+  const experiment = createExperiment({ views, sourceState: () => ({ stream: null, landmarks: null }), onSettingsChange: () => {} });
+  const points = Array.from({ length: 33 }, (_, index) => ({ x: .3 + index / 100, y: .2 + index / 120, z: 0, visibility: 1 }));
+  document.querySelector('[data-position="hip"]').click();
+  if (document.querySelector('[data-visual="trajectory"]').disabled) throw new Error("Trajectory remained disabled");
+  document.querySelector('[data-group="timing"] [data-value="terminal"]').click();
+  for (let i = 0; i < 3; i++) {
+    experiment.beginTrial(); experiment.sample("A", points); experiment.sample("B", points); await new Promise(resolve => setTimeout(resolve, 10)); experiment.endTrial({});
+  }
+  const buttons = document.querySelectorAll("#trialHistory .trial-item > button:first-child");
+  if (buttons.length !== 3 || document.querySelector("#exportAllTrials").disabled) throw new Error("Trial history did not retain 3 trials");
+  buttons[0].click();
+  if (document.querySelector("#experimentReplay").hidden || !document.querySelector("#replayTitle").textContent.includes("01")) throw new Error("Older trial did not open");
+  document.querySelector('[data-replay-option="video"]').click();
+  if (!document.querySelector(".replay-viewport").classList.contains("skeleton-only")) throw new Error("Skeleton-only replay did not switch");
+  document.querySelector("#replaySeek").value = "500";
+  document.querySelector("#replaySeek").dispatchEvent(new Event("input"));
+  if (!document.querySelector('[data-replay-wave="front"]').width || document.querySelector("#replaySeek").value !== "500") throw new Error("Waveform / seek did not render");
+  document.querySelector("#closeExperimentReplay").click();
+  document.querySelector('[data-group="timing"] [data-value="none"]').click();
+  if (!views.front.root.classList.contains("feedback-suppressed")) throw new Error("No BF did not hide live feedback");
+  experiment.beginTrial(); experiment.sample("A", points); experiment.sample("B", points); experiment.endTrial({});
+  if (document.querySelectorAll("#trialHistory .trial-item").length !== 4 || !document.querySelector("#trialSummary").textContent.includes("No BF")) throw new Error("No BF did not retain an unreported trial");
+  for (let i = 0; i < 8; i++) { experiment.beginTrial(); experiment.sample("A", points); experiment.endTrial({}); }
+  if (document.querySelectorAll("#trialHistory .trial-item").length !== 10 || document.querySelector("#trialHistory").textContent.includes("Trial 01")) throw new Error("10-Trial retention failed");
+  document.querySelector("#result").textContent = "PASS: older replay, skeleton-only, waveform/seek, trajectory, No BF, 10-Trial cap";
+} catch (error) { document.querySelector("#result").textContent = `FAIL: ${error.stack || error}`; }
+</script></body></html>

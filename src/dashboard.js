@@ -1,5 +1,7 @@
 import Peer from "https://cdn.jsdelivr.net/npm/peerjs@1.5.5/+esm";
 import { createPose, draw, measure, setMetrics, getCamera } from "./pose.js";
+import { createExperiment } from "./experiment.js";
+document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="./src/experiment.css">');
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const views = Object.fromEntries(["front", "side"].map(name => {
@@ -10,7 +12,7 @@ const phones = { A: { sessionId: null, call: null, conn: null, stream: null, met
 const pcFeed = document.createElement("video");
 pcFeed.muted = true; pcFeed.playsInline = true;
 let pcStream, pcPose, pcMetrics, pcLandmarks, pcLast = -1, pcGeneration = 0;
-let recorders = [], recordedUrls = [];
+let recorders = [], recordedUrls = [], experiment, recordingPending = false, recordTimer = 0, recordingBytes = 0;
 
 function sourceName(source) { return source === "pc" ? "PC Camera" : `Smartphone ${source}`; }
 function sourceState(source) { return source === "pc" ? { stream: pcStream, metrics: pcMetrics, landmarks: pcLandmarks } : phones[source]; }
@@ -33,6 +35,7 @@ function render(view) {
   if (stream && landmarks) draw(canvas, landmarks);
   else canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
   if (metrics) setMetrics(view.root, metrics); else resetMetrics(view);
+  experiment?.decorate(view, state);
   $(".placeholder", view.root).classList.toggle("hidden", !!stream);
   const badge = $(".live-badge", view.root);
   badge.textContent = stream ? "● LIVE" : "● WAITING";
@@ -46,6 +49,14 @@ function updateStatus() {
   $("#systemStatus").textContent = ready === 2 ? "2視点を解析中" : `${ready}/2視点 接続中`;
 }
 function updateCoach() {
+  if (experiment && !experiment.liveVisible()) { $(".feedback").style.visibility = "hidden"; return; }
+  $(".feedback").style.visibility = "visible";
+  if (experiment?.settings.type === "KR") {
+    $("#depthValue").textContent = "KR";
+    $("#coachTitle").textContent = "設定Targetとの比較";
+    $("#coachText").textContent = "各映像のTarget表示で現在値を確認できます。Trial終了後に結果を要約します。";
+    return;
+  }
   const values = Object.values(views).map(view => sourceState(view.source).metrics).filter(Boolean);
   const dial = $(".depth-dial");
   if (!values.length) {
@@ -57,19 +68,25 @@ function updateCoach() {
   const knee = Math.round(values.reduce((sum, value) => sum + value.knee, 0) / values.length);
   const trunk = Math.round(values.reduce((sum, value) => sum + value.trunk, 0) / values.length);
   $("#depthValue").textContent = `${Math.max(0, Math.min(100, Math.round((170 - knee) / .8)))}%`;
-  dial.classList.toggle("good", knee <= 100 && trunk <= 45);
-  dial.classList.toggle("warn", trunk > 45);
-  if (trunk > 45) { $("#coachTitle").textContent = "胸を起こしましょう"; $("#coachText").textContent = "体幹の倒れ込みを検出しています。"; }
-  else if (knee <= 100) { $("#coachTitle").textContent = "良い深さです"; $("#coachText").textContent = values.length === 2 ? "正面・側面の両視点で動作を確認しています。" : "接続中の視点で良好な深さです。"; }
-  else { $("#coachTitle").textContent = "安定して下降中"; $("#coachText").textContent = "膝とつま先の方向を揃えて動作を続けてください。"; }
+  const target = experiment?.settings.targets.knee, comparing = experiment?.settings.visuals.target && target?.enabled;
+  dial.classList.toggle("good", !!comparing && Math.abs(knee - target.value) <= target.tolerance);
+  dial.classList.toggle("warn", !!comparing && Math.abs(knee - target.value) > target.tolerance);
+  $("#coachTitle").textContent = comparing ? `Knee Target ${target.value}±${target.tolerance}°` : "計測中 / Live Coach";
+  $("#coachText").textContent = `${values.length}視点の膝 ${knee}°・体幹 ${trunk}°。${comparing ? "色はユーザー指定Targetとの差を示します。" : "研究仮説に合わせてTargetを設定できます。"}`;
 }
 function labelPhone(slot) { $("#state" + slot).textContent = phones[slot].stream ? `接続中 · ID ${phones[slot].sessionId.slice(0, 8)}` : "接続待ち"; }
 function clearPhone(slot) {
   const phone = phones[slot];
   if (recorders.length && Object.values(views).some(view => view.source === slot)) stopRecording();
   phone.stream = null; phone.metrics = null; phone.landmarks = null;
+  experiment?.sourceChanged();
   labelPhone(slot); renderSource(slot);
 }
+function broadcastFeedback() {
+  for (const phone of Object.values(phones)) if (phone.conn?.open) phone.conn.send({ type: "feedback", visible: experiment?.liveVisible() ?? true });
+  updateCoach();
+}
+experiment = createExperiment({ views, sourceState, onSettingsChange: broadcastFeedback });
 const peer = new Peer();
 peer.on("open", id => {
   $("#roomCode").textContent = id.slice(-6).toUpperCase();
@@ -100,9 +117,11 @@ peer.on("call", call => {
 peer.on("connection", conn => {
   const { slot, sessionId } = identity(conn.metadata), phone = phones[slot];
   phone.conn = conn;
+  conn.on("open", broadcastFeedback);
   conn.on("data", data => {
     if (phone.conn !== conn || phone.call?.peer !== conn.peer || phone.sessionId !== sessionId || data.type !== "pose") return;
-    phone.metrics = data.metrics; phone.landmarks = data.landmarks; renderSource(slot);
+    phone.metrics = data.metrics; phone.landmarks = data.landmarks;
+    experiment.sample(slot, data.landmarks); renderSource(slot);
   });
   conn.on("close", () => { if (phone.conn === conn) phone.conn = null; });
 });
@@ -112,9 +131,9 @@ async function startPc() {
   const button = $("#startPc"); button.disabled = true;
   const generation = ++pcGeneration;
   try {
-    if (recorders.length) stopRecording();
+    if (recorders.length) await stopRecording();
     pcStream?.getTracks().forEach(track => track.stop());
-    pcStream = null; pcMetrics = pcLandmarks = null; renderSource("pc");
+    pcStream = null; pcMetrics = pcLandmarks = null; experiment.sourceChanged(); renderSource("pc");
     pcStream = await getCamera({ video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false });
     pcFeed.srcObject = pcStream; await pcFeed.play();
     pcPose ??= await createPose();
@@ -132,20 +151,30 @@ function loopPc(time, generation) {
       pcLandmarks = result.landmarks?.[0] || null;
       if (pcLandmarks) pcMetrics = measure(pcLandmarks);
       else pcMetrics = null;
+      if (pcLandmarks) experiment.sample("pc", pcLandmarks);
       renderSource("pc");
     });
   }
   requestAnimationFrame(next => loopPc(next, generation));
 }
 $("#startPc").addEventListener("click", startPc);
-function stopRecording() {
+async function stopRecording() {
   const active = recorders; recorders = [];
-  for (const recorder of active) if (recorder.state !== "inactive") recorder.stop();
+  if (!active.length || recordingPending) return;
+  clearTimeout(recordTimer); recordTimer = 0;
+  recordingPending = true; $("#recordViews").disabled = true;
+  await Promise.all(active.map(recorder => new Promise(resolve => {
+    if (recorder.state === "inactive") return resolve();
+    recorder.addEventListener("stop", resolve, { once: true }); recorder.stop();
+  })));
+  experiment.endTrial(Object.fromEntries(active.map(recorder => [recorder.viewName, recorder.savedBlob])));
   $("#recordViews").textContent = "2視点を録画";
   for (const view of Object.values(views)) view.select.disabled = false;
   $("#recordStatus").textContent = "録画終了。完成した映像をダウンロードしてください。";
+  recordingPending = false; $("#recordViews").disabled = false; broadcastFeedback();
 }
 $("#recordViews").addEventListener("click", () => {
+  if (recordingPending) return;
   if (recorders.length) { stopRecording(); return; }
   if (!window.MediaRecorder) { $("#recordStatus").textContent = "このブラウザは録画に対応していません"; return; }
   const selected = Object.entries(views).map(([name, view]) => [name, view, sourceState(view.source).stream]);
@@ -155,25 +184,33 @@ $("#recordViews").addEventListener("click", () => {
   try {
     const mimeType = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"].find(type => MediaRecorder.isTypeSupported(type));
     const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    recordingBytes = 0;
     const prepared = selected.map(([name, view, stream]) => {
       const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined), chunks = [];
-      recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+      recorder.ondataavailable = event => {
+        if (event.data.size) { chunks.push(event.data); recordingBytes += event.data.size; }
+        if (recordingBytes > 450 * 1048576 && recorders.length) stopRecording();
+      };
       recorder.onstop = () => {
         if (!chunks.length) return;
         const blob = new Blob(chunks, { type: recorder.mimeType || "video/webm" });
+        recorder.savedBlob = blob;
         const url = URL.createObjectURL(blob); recordedUrls.push(url);
         const link = document.createElement("a"); link.href = url;
         link.download = `VBF-${stamp}-${name}-${view.source}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
         link.textContent = `${name === "front" ? "Front" : "Side"}映像を保存`;
         $("#recordDownloads").append(link);
       };
+      recorder.viewName = name;
       return recorder;
     });
     recorders = prepared;
     for (const recorder of prepared) recorder.start(1000);
+    experiment.beginTrial(); broadcastFeedback();
+    recordTimer = setTimeout(() => { if (recorders.length) stopRecording(); }, 5 * 60 * 1000);
     for (const view of Object.values(views)) view.select.disabled = true;
     $("#recordViews").textContent = "録画を終了";
-    $("#recordStatus").textContent = "Front／Sideの映像を録画中（Skeletonと指標は映像に含まれません）";
+    $("#recordStatus").textContent = "Front／Sideの映像を録画中（最大5分・約450 MBで自動終了）";
   } catch (error) {
     stopRecording(); $("#recordStatus").textContent = `録画を開始できません: ${error.message}`;
   }
@@ -184,6 +221,7 @@ for (const [name, view] of Object.entries(views)) {
     const previous = view.source, chosen = view.select.value;
     if (other.source === chosen) { other.source = previous; other.select.value = previous; }
     view.source = chosen;
+    experiment.sourceChanged();
     render(view); render(other); updateStatus(); updateCoach();
   });
   view.video.addEventListener("loadedmetadata", () => render(view));
