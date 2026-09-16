@@ -15,7 +15,7 @@ python -m http.server 4173
 ```
 
 - 2-Webカメラ版: `http://localhost:4173/lab.html`
-- PC＋iPhone版: `http://localhost:4173/?remote=1`
+- PC＋Remote Smartphone版: `http://localhost:4173/?remote=1`
 
 ## 使用技術
 
@@ -45,10 +45,11 @@ python -m http.server 4173
 - タイムスタンプ、カメラ、View、角度、追跡点、非対称指標、Feedback条件、全Landmarkを含むCSV
 - Camera A/B録画映像のダウンロード
 
-### 維持した既存機能
+### Remote Smartphone画面
 
-- PC正面カメラ＋iPhone側面カメラのWebRTC接続
-- QRコードペアリング
+- Front／SideそれぞれでPC Camera、Smartphone A、Smartphone Bを選択（重複選択時は他方と入替）。初期値はPC正面＋A側面です。A正面＋PC側面、A正面＋B側面も選択できます。
+- A/BそれぞれのQRコードと端末ごとに固有のSession IDを用いたWebRTC接続。スマートフォンで各QRを開き、カメラを開始してください。
+- 各視点で映像、Skeleton、角度、Visual Feedbackを表示。PC映像はPCで、Remote映像はスマートフォンでPose推定します。2視点の生映像を同時録画して個別に保存できます。
 - iPhoneの背面／インカメラ切替
 - Remote Camera画面でのカメラ一覧・手動選択、識別可能な物理Ultra Wideの0.5×／通常Wideの1×切替（初期値1×）
 - Remote Cameraの全身表示（`object-fit: contain`）と、レンズ切替後のWebRTC・姿勢推定再接続
@@ -62,6 +63,6 @@ python -m http.server 4173
 - MediaRecorderが出力する映像形式はブラウザによって異なります。
 - MediaPipe本体とモデルはCDNから取得するため、初回読み込みに通信が必要です。
 - スマートフォンでカメラ開始・権限許可後にデバイス名が公開されます。ブラウザが物理Ultra Wideを独立した`videoinput`として識別可能な名称で公開しない場合、0.5×は無効です。CSS縮小やデジタルズームによる代用はしません。手動カメラ選択は残しています。
-- レンズ切替は各スマートフォン画面で独立しますが、従来のPC＋Remote画面の受信枠は1台分です。2台のRemote映像を同時受信・統合する機能は未実装です。
+- レンズ切替は各スマートフォン画面で独立します。Remote Dashboardの録画は映像のみで、Skeleton・数値の焼き込みや再生時の再解析は行いません。ブラウザが対応するMediaRecorder形式に依存します。
 - 実機での0.5×選択と映像・Pose再開は、使用する端末・ブラウザで確認してください。
 - 実際の授業前に、使用PC・カメラ・ブラウザの組み合わせで録画と再生を確認してください。

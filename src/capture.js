@@ -4,7 +4,10 @@ document.head.insertAdjacentHTML("beforeend", '<link rel="stylesheet" href="./sr
 
 const $ = (s, r = document) => r.querySelector(s);
 const target = new URLSearchParams(location.search).get("peer");
+const source = new URLSearchParams(location.search).get("source") === "B" ? "B" : "A";
+const sessionId = crypto.randomUUID();
 const video = $("video"), canvas = $("canvas"), root = $(".capture-card");
+$(".privacy-note").textContent = "映像は接続中のPCへ直接送られます。PCで録画を開始した場合のみ保存されます。";
 let stream, pose, conn, call, peer, last = -1, running = false, lastSent = 0;
 let facing = "environment", lens = "wide", cameraDevices = [], ultraId = null, wideId = null;
 let manualDevice = "", switching = false, generation = 0;
@@ -16,7 +19,7 @@ switcher.setAttribute("aria-label", "前面・背面カメラ");
 switcher.innerHTML = '<button type="button" class="active" data-facing="environment">背面カメラ</button><button type="button" data-facing="user">インカメラ</button>';
 $(".lens-controls").before(switcher);
 if (!target) { $("#systemStatus").textContent = "接続先がありません"; $("#startCapture").disabled = true; }
-else $("#systemStatus").textContent = "PCへの接続準備完了";
+else $("#systemStatus").textContent = `Smartphone ${source} / ID ${sessionId.slice(0, 8)} 接続準備完了`;
 
 function classify(label) {
   if (/front|face\s*time|selfie|前面|インカメラ/i.test(label)) return "front";
@@ -71,11 +74,11 @@ async function start() {
     pose ??= await createPose();
     peer = new Peer();
     await new Promise((resolve, reject) => { peer.on("open", resolve); peer.on("error", reject); });
-    call = peer.call(target, stream);
-    conn = peer.connect(target, { reliable: false });
+    call = peer.call(target, stream, { metadata: { source, sessionId } });
+    conn = peer.connect(target, { reliable: false, metadata: { source, sessionId } });
     conn.on("open", () => {
       $("#statusDot").classList.add("active");
-      $("#systemStatus").textContent = `${facing === "user" ? "インカメラ" : lens === "ultra" ? "0.5× Ultra Wide" : "背面カメラ"}をPCへ送信中`;
+      $("#systemStatus").textContent = `Smartphone ${source} · ${facing === "user" ? "インカメラ" : lens === "ultra" ? "0.5× Ultra Wide" : "背面カメラ"}をPCへ送信中`;
       button.textContent = "カメラを再接続";
       running = true; const current = generation; requestAnimationFrame(t => loop(t, current));
     });
