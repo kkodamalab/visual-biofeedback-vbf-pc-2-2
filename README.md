@@ -1,55 +1,62 @@
-# VBF Dual View Lab
+# VBF Motion Lab
 
-iPhoneの側面カメラとPC内蔵の正面カメラを使い、スクワットを2視点でリアルタイム可視化する講義デモ向けMVPです。PCを統合ダッシュボード、iPhoneを独立した撮影・姿勢推定端末として使用します。
+2台の一般的なWebカメラを独立した正面／側面Viewとして扱い、身体動作の計測・簡易解析・Visual Biofeedback・録画再生・CSV出力をブラウザ内で行うMVPです。従来のPC＋iPhone版も維持しています。
 
-## 公開版の使い方
+## 起動方法
 
-1. PCでGitHub Pagesのトップページを開く。
-2. 「PCカメラを開始」を押してカメラ権限を許可する。
-3. 表示されたQRコードをiPhoneの標準カメラで読み取る。
-4. iPhoneで「側面カメラを開始」を押してカメラ権限を許可する。
-5. PCモニタに正面・側面の2映像と解析結果が横並びで表示される。
+### 公開版
 
-## ローカル起動
+GitHub Pagesのトップページを開くと、2-Webカメラ計測画面へ移動します。カメラ権限を許可し、Camera A/Bで異なるデバイスを選択して「カメラ開始」を押してください。
 
-PCのみの画面確認には次のコマンドを使用できます。
+### ローカル
 
 ```powershell
 python -m http.server 4173
 ```
 
-`http://localhost:4173` を開きます。ただし、別端末のiPhoneからPCのHTTPアドレスへアクセスするとカメラAPIを利用できないため、実機接続にはHTTPSのGitHub Pages版を使用してください。
+- 2-Webカメラ版: `http://localhost:4173/lab.html`
+- PC＋iPhone版: `http://localhost:4173/?remote=1`
 
 ## 使用技術
 
 - HTML / CSS / Vanilla JavaScript
 - MediaPipe Tasks Vision Pose Landmarker
-- WebRTC（PeerJS）による端末間の映像・DataChannel通信
-- MediaDevices API
-- Canvas 2D
-- QRCode.js
+- MediaDevices API / MediaRecorder API
+- Canvas 2D（Skeleton、Trajectory、時系列グラフ）
+- WebRTC / PeerJS（従来のPC＋iPhone版）
 - GitHub Actions / GitHub Pages
 
 ## 実装済み機能
 
-- PC用統合ダッシュボードとiPhone用撮影ページ
-- QRコードによる一時セッションのペアリング
-- iPhone側で背面カメラ／インカメラをワンタップ切替
-- PC正面カメラとiPhone背面カメラの同時表示
-- 各端末で独立した姿勢推定
-- スケルトン、膝関節角度、股関節角度、体幹傾斜
-- 2視点の値を使った深度ゲージとコーチング表示
-- iPhoneからPCへの映像・ランドマーク・タイムスタンプ送信
-- GitHub Pagesへの自動公開
+### 2-Webカメラ計測画面
 
-## プライバシーと通信
+- Camera A/Bの個別選択、同時表示、Front／Side指定
+- 両カメラの独立したPose estimation
+- Skeletonのカメラ別描画
+- 膝角度、股関節角度、体幹傾斜、正面左右非対称指標
+- Wrist／Shoulder／Hip／Knee、Left／Rightを選べる3秒間のTrajectory
+- No Feedback／Concurrent Feedback／Terminal Feedback
+- Skeleton／Trajectory／Numeric／Angles／Targetの個別ON/OFF
+- Knee angleのTarget値とTolerance、範囲内表示
+- Knee／Hip／Trunk／Tracking X/Yの時系列グラフ
+- Camera A/Bの同時録画、同期再生、Seek、再生速度
+- Terminal Feedbackで録画後にReplayとSkeletonを表示
+- Trial number、Condition、Memo
+- タイムスタンプ、カメラ、View、角度、追跡点、非対称指標、Feedback条件、全Landmarkを含むCSV
+- Camera A/B録画映像のダウンロード
 
-映像はWebRTCで端末間転送され、アプリでは録画・保存しません。PeerJSの公開シグナリングサービスとSTUNを接続確立に利用します。MediaPipe、PeerJS、QRCode.jsはCDNから読み込みます。
+### 維持した既存機能
+
+- PC正面カメラ＋iPhone側面カメラのWebRTC接続
+- QRコードペアリング
+- iPhoneの背面／インカメラ切替
+- 端末別姿勢推定とリアルタイム指標
 
 ## 現時点での制約
 
-- 2端末のランドマークには時刻を付与しますが、厳密なフレーム同期・校正・3次元再構成は未実装です。
-- ネットワークやNAT環境によってWebRTC接続できない場合があります。独自TURNサーバーは未設定です。
-- 角度は各カメラの2D投影上の推定値です。医療・競技判定用途の精度は保証しません。
-- 初回読み込みと端末間接続にはインターネット接続が必要です。
-- 講義前に実際のPC・iPhone・会場ネットワークで接続テストしてください。
+- ブラウザによるソフトウェア同時開始であり、ハードウェア同期ではありません。
+- 角度と左右差は2D投影上の簡易指標です。3D再構成・カメラ校正・競技判定は行いません。
+- 2台同時取得の可否、最大解像度、録画形式はカメラドライバとブラウザに依存します。
+- MediaRecorderが出力する映像形式はブラウザによって異なります。
+- MediaPipe本体とモデルはCDNから取得するため、初回読み込みに通信が必要です。
+- 実際の授業前に、使用PC・カメラ・ブラウザの組み合わせで録画と再生を確認してください。
