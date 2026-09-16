@@ -1,0 +1,27 @@
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><link rel="stylesheet" href="../src/monitor.css"></head><body>
+<header class="monitor-bar"><nav><button data-mode="dual" class="active">Dual View</button><button data-mode="front">Front Only</button><button data-mode="side">Side Only</button></nav><button id="fullscreen">Fullscreen</button><span id="monitorStatus"></span></header>
+<main id="monitorGrid" class="monitor-grid" data-mode="dual"><section data-view="front" class="monitor-view"><div class="monitor-frame"><canvas class="monitor-picture"></canvas><div class="monitor-target"></div></div><div class="monitor-values"></div><div class="monitor-wave" hidden><canvas></canvas></div></section><section data-view="side" class="monitor-view"><div class="monitor-frame"><canvas class="monitor-picture"></canvas><div class="monitor-target"></div></div><div class="monitor-values"></div><div class="monitor-wave" hidden><canvas></canvas></div></section></main><p id="monitorCoach"></p><p id="result">RUNNING</p>
+<script type="module">
+import { paint } from "../src/monitor.js";
+try {
+  const views = {};
+  for (const name of ["front", "side"]) {
+    const root = document.createElement("section"); root.innerHTML = '<div class="experiment-target">Knee 90°</div><div class="experiment-values">Hip 80°</div><div class="experiment-wave"><canvas></canvas></div>';
+    const canvas = document.createElement("canvas"); canvas.width = 80; canvas.height = 40;
+    canvas.getContext("2d").fillStyle = "#c9ff39"; canvas.getContext("2d").fillRect(1, 1, 10, 10);
+    root.querySelector("canvas").width = 80; root.querySelector("canvas").height = 40;
+    root.querySelector("canvas").getContext("2d").fillRect(1, 1, 10, 10);
+    views[name] = { root, video: document.createElement("video"), canvas, source: name };
+  }
+  const bridge = { views, sourceState: () => ({ stream: null }) };
+  paint("front", { camera: "off" }, bridge); paint("side", { camera: "off" }, bridge);
+  const output = document.querySelector('[data-view="front"]');
+  if (!output.querySelector('.monitor-target').textContent.includes("90") || !output.querySelector('.monitor-values').textContent.includes("80") || output.querySelector('.monitor-wave').hidden) throw new Error("Monitor did not copy feedback/waveform");
+  if (!output.querySelector('.monitor-picture').getContext('2d').getImageData(2, 2, 1, 1).data[1]) throw new Error("Monitor did not copy existing Dashboard Canvas");
+  views.front.root.querySelector('.experiment-wave').hidden = true; paint("front", { camera: "off" }, bridge);
+  if (!output.querySelector('.monitor-wave').hidden) throw new Error("Monitor waveform OFF retained graph");
+  document.querySelector('[data-mode="side"]').click();
+  if (document.querySelector('#monitorGrid').dataset.mode !== 'side') throw new Error("Monitor mode did not change");
+  document.querySelector('#result').textContent = 'PASS: Monitor copies Dashboard overlays/waveform, hides waveform, switches view';
+} catch (error) { document.querySelector('#result').textContent = `FAIL: ${error.stack || error}`; }
+</script></body></html>

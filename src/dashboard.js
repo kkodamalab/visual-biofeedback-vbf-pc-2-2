@@ -13,6 +13,7 @@ const pcFeed = document.createElement("video");
 pcFeed.muted = true; pcFeed.playsInline = true;
 let pcStream, pcPose, pcMetrics, pcLandmarks, pcLast = -1, pcGeneration = 0;
 let recorders = [], recordedUrls = [], experiment, recordingPending = false, recordTimer = 0, recordingBytes = 0;
+const monitorChannel = "BroadcastChannel" in window ? new BroadcastChannel("vbf-monitor") : null;
 
 function sourceName(source) { return source === "pc" ? "PC Camera" : `Smartphone ${source}`; }
 function sourceState(source) { return source === "pc" ? { stream: pcStream, metrics: pcMetrics, landmarks: pcLandmarks } : phones[source]; }
@@ -87,8 +88,18 @@ function clearPhone(slot) {
 function broadcastFeedback() {
   for (const phone of Object.values(phones)) if (phone.conn?.open) phone.conn.send({ type: "feedback", visible: experiment?.liveVisible() ?? true });
   updateCoach();
+  monitorChannel?.postMessage({ type: "settings", settings: experiment?.settings });
 }
 experiment = createExperiment({ views, sourceState, onSettingsChange: broadcastFeedback });
+// Same-origin presentation window reads existing video/canvas elements; it never opens a camera or runs Pose.
+window.__vbfMonitorBridge = { views, get settings() { return experiment.settings; }, sourceState };
+$("#openMonitor").addEventListener("click", () => {
+  const presentation = window.open("./monitor.html", "vbf-monitor");
+  if (!presentation) $("#systemStatus").textContent = "Monitorが開けません。ポップアップを許可してください";
+});
+monitorChannel?.addEventListener("message", event => {
+  if (event.data?.type === "ready") broadcastFeedback();
+});
 const peer = new Peer();
 peer.on("open", id => {
   $("#roomCode").textContent = id.slice(-6).toUpperCase();

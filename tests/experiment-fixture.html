@@ -15,13 +15,29 @@ try {
   experiment.sample("A", points); experiment.sample("B", points); experiment.refreshSettings();
   const checksum = canvas => canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data.reduce((sum, value) => sum + value, 0);
   const beforeToggle = checksum(views.front.canvas);
+  const beforeSide = checksum(views.side.canvas);
+  if (document.querySelectorAll('.camera-panel > .experiment-wave').length !== 2) throw new Error("Waveforms not directly below each camera");
+  document.querySelector('[data-visual="waveform"]').click();
+  if (document.querySelector('.camera-panel .experiment-wave').hidden) throw new Error("Waveform ON did not show camera waveform");
+  document.querySelector('[data-visual="waveform"]').click();
+  if (!document.querySelector('.camera-panel .experiment-wave').hidden) throw new Error("Waveform OFF left a graph region");
+  const line = document.querySelector('[data-level="skeletonWidth"]'); line.value = "5"; line.dispatchEvent(new Event("input", { bubbles: true }));
+  if (experiment.settings.skeletonWidth !== 5 || checksum(views.front.canvas) === beforeToggle || checksum(views.side.canvas) === beforeSide) throw new Error("Skeleton line width was not applied to both views");
+  const beforeMarker = checksum(views.front.canvas);
+  const marker = document.querySelector('[data-level="markerSize"]'); marker.value = "1"; marker.dispatchEvent(new Event("input", { bubbles: true }));
+  if (experiment.settings.markerSize !== 1 || document.querySelector('[data-level-output="markerSize"]').value !== "1" || checksum(views.front.canvas) === beforeMarker) throw new Error("Marker size was not applied");
   document.querySelector('[data-angle="knee"]').click();
   if (checksum(views.front.canvas) === beforeToggle) throw new Error("Angle checkbox did not update overlay immediately");
   document.querySelector('[data-angle="knee"]').click();
   document.querySelector('[data-group="camera"] [data-value="off"]').click();
   if (getComputedStyle(views.front.video).visibility !== "hidden" || checksum(views.front.canvas) === 0) throw new Error("Camera video OFF hid the skeleton or kept video visible");
+  const skeletonOn = checksum(views.front.canvas);
+  document.querySelector('[data-visual="skeleton"]').click();
+  if (checksum(views.front.canvas) === skeletonOn || checksum(views.front.canvas) === 0) throw new Error("Video OFF forced skeleton or hid selected variable");
   document.querySelector('[data-group="camera"] [data-value="on"]').click();
   if (getComputedStyle(views.front.video).visibility === "hidden") throw new Error("Camera video ON did not restore video");
+  if (checksum(views.front.canvas) === skeletonOn) throw new Error("Video ON forced skeleton back on");
+  document.querySelector('[data-visual="skeleton"]').click();
   document.querySelector('[data-position="hip"]').click();
   if (document.querySelector('[data-visual="trajectory"]').disabled) throw new Error("Trajectory remained disabled");
   document.querySelector('[data-group="timing"] [data-value="terminal"]').click();
@@ -46,6 +62,6 @@ try {
   if (document.querySelectorAll("#trialHistory .trial-item").length !== 10 || document.querySelector("#trialHistory").textContent.includes("Trial 01")) throw new Error("10-Trial retention failed");
   document.querySelector('[data-group="timing"] [data-value="concurrent"]').click();
   if (views.front.root.classList.contains("feedback-suppressed")) throw new Error("Concurrent did not restore live feedback");
-  document.querySelector("#result").textContent = "PASS: live variable overlay, camera video toggle, older replay, waveform/seek, No BF, 10-Trial cap";
+  document.querySelector("#result").textContent = "PASS: independent video/skeleton/variables, 5-level widths, per-view waveform, older replay, waveform/seek, No BF, 10-Trial cap";
 } catch (error) { document.querySelector("#result").textContent = `FAIL: ${error.stack || error}`; }
 </script></body></html>

@@ -11,6 +11,7 @@ GitHub Pagesのトップページを開くと、2-Webカメラ計測画面へ移
 - Remote実験Dashboard: `https://kkodamalab.github.io/visual-biofeedback-vbf-pc-2-2/?remote=1`
 - A/BそれぞれのQRを別のスマートフォンで開き、カメラを開始。Front／SideのSourceを選択します。PC Cameraを使う場合だけPCカメラ開始を押します。
 - FEEDBACKで条件を設定し、「2視点を録画」→「録画を終了」で1 Trial。Trial Historyから過去TrialをReplay／CSV・映像保存します。
+- Dashboardの「Open Monitor View ↗」を押すと同一ブラウザの別Window／Tabで投影専用画面を開きます。Dashboardを開いたまま使用してください。
 
 ### ローカル
 
@@ -27,12 +28,13 @@ python -m http.server 4173
 - MediaPipe Tasks Vision Pose Landmarker
 - MediaDevices API / MediaRecorder API
 - Canvas 2D（Skeleton、Trajectory、時系列グラフ）
+- BroadcastChannelと同一originのDashboard参照（Monitorの設定通知／既存映像・Canvas描画の共有。Monitorはカメラ取得・Pose推定なし）
 - WebRTC / PeerJS（PC＋Remote Smartphone、またはRemote 2台）
 - GitHub Actions / GitHub Pages
 
 ## 簡易テスト
 
-`node --test tests/experiment-math.test.mjs`で計測式を確認できます。`/tests/experiment-fixture.html`は合成Poseで変数ON/OFF即時描画、映像ON/OFF、複数Trial・過去Trial Replay・No BF・Seek・10件上限をブラウザ検証します。実カメラ／2台WebRTC／0.5×は使用端末で確認してください。
+`node --test tests/experiment-math.test.mjs`で計測式を確認できます。`/tests/experiment-fixture.html`は合成Poseで変数ON/OFF即時描画、映像／Skeletonの独立切替、線幅・点サイズ、各視点直下の波形、複数Trial・過去Trial Replay・No BF・Seek・10件上限をブラウザ検証します。`/tests/monitor-fixture.html`は既存Canvas・数値・Target・波形のMonitor描画と表示モードを検証します。実カメラ／2台WebRTC／0.5×は使用端末で確認してください。
 
 ## 実装済み機能
 
@@ -61,6 +63,8 @@ python -m http.server 4173
 - Dashboardの実験設定: No BF／Concurrent／Terminal、KR／KP、Simple／Detailed、5角度・7位置の複数選択、Numeric／Skeleton／Trajectory／Waveform／Targetの個別ON/OFF。
 - Concurrentでは選択した角度だけを関節の弧・基準線・数値、選択したPositionだけをマーカー・座標として映像上へ重ねます。チェックの変更は即時反映され、基本スケルトンは独立表示です。
 - Live Camera VideoをON/OFF可能。OFFは映像の表示だけを隠し、カメラ入力・Pose推定・録画を継続します。QRはA/Bを離した独立カードです。
+- 映像とSkeletonを独立切替。Skeleton線幅・Joint marker sizeはそれぞれ共通5段階（初期3）。選択した最大3系列の波形は各視点の映像直下に表示し、OFF時は領域を消します。
+- 投影専用Monitor Viewを別Window／Tabで開き、Dual／Front Only／Side OnlyとFullscreenを切替。Dashboardの描画済みCanvas・既存videoを同一originで読み取り、Target・数値・波形・Coachを表示します。設定変更はBroadcastChannelでも通知します。Monitor側ではカメラ取得・Pose推定・録画を行いません。
 - ユーザー指定のAngle Target／Toleranceを複数設定。Concurrentは映像上の値・差とTarget zone、Terminalは終了後のReplay・波形・結果要約で比較します。
 - 録画開始〜停止を1 Trialとして映像・正規化Landmark・5角度・7位置・設定・時刻をメモリに保持。最大10 Trialまたは概ね500 MB（最新Trialは保持）。個別／全削除、任意のTrialをPlay／Pause／Seek／速度変更、動画・Skeleton・軌跡・数値・波形の切替、波形クリックSeek、Trial／全Trial CSV、各映像Download。
 - iPhoneの背面／インカメラ切替
@@ -83,4 +87,5 @@ python -m http.server 4173
 - スマートフォンでカメラ開始・権限許可後にデバイス名が公開されます。ブラウザが物理Ultra Wideを独立した`videoinput`として識別可能な名称で公開しない場合、0.5×は無効です。CSS縮小やデジタルズームによる代用はしません。手動カメラ選択は残しています。
 - レンズ切替は各スマートフォン画面で独立します。録画映像は生映像で、Skeleton・数値の焼き込みはありません。保存したLandmarkをReplayのOverlayに用います。ブラウザが対応するMediaRecorder形式に依存します。
 - 実機での0.5×選択と映像・Pose再開は、使用する端末・ブラウザで確認してください。
+- Monitor ViewはDashboardから開いた同一originの別Window／Tabでのみ映像を表示します。ブラウザのPopupブロック／opener遮断がある場合は許可が必要です。Dashboardを閉じると映像は止まります。Fullscreenはユーザー操作とブラウザのFullscreen API対応が必要です。
 - 実際の授業前に、使用PC・カメラ・ブラウザの組み合わせで録画と再生を確認してください。
