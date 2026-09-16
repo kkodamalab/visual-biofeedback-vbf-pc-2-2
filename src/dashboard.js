@@ -67,12 +67,14 @@ function updateCoach() {
   }
   const knee = Math.round(values.reduce((sum, value) => sum + value.knee, 0) / values.length);
   const trunk = Math.round(values.reduce((sum, value) => sum + value.trunk, 0) / values.length);
-  $("#depthValue").textContent = `${Math.max(0, Math.min(100, Math.round((170 - knee) / .8)))}%`;
-  const target = experiment?.settings.targets.knee, comparing = experiment?.settings.visuals.target && target?.enabled;
+  const selectedAngles = experiment?.settings.angles || [];
+  $("#depthValue").textContent = selectedAngles.includes("knee") ? `${Math.max(0, Math.min(100, Math.round((170 - knee) / .8)))}%` : "—";
+  const target = experiment?.settings.targets.knee, comparing = selectedAngles.includes("knee") && experiment?.settings.visuals.target && target?.enabled;
   dial.classList.toggle("good", !!comparing && Math.abs(knee - target.value) <= target.tolerance);
   dial.classList.toggle("warn", !!comparing && Math.abs(knee - target.value) > target.tolerance);
   $("#coachTitle").textContent = comparing ? `Knee Target ${target.value}±${target.tolerance}°` : "計測中 / Live Coach";
-  $("#coachText").textContent = `${values.length}視点の膝 ${knee}°・体幹 ${trunk}°。${comparing ? "色はユーザー指定Targetとの差を示します。" : "研究仮説に合わせてTargetを設定できます。"}`;
+  const valuesText = [selectedAngles.includes("knee") && `膝 ${knee}°`, selectedAngles.includes("trunk") && `体幹 ${trunk}°`].filter(Boolean).join("・");
+  $("#coachText").textContent = `${values.length}視点を解析中。${valuesText ? `${valuesText}。` : ""}${comparing ? "色はユーザー指定Targetとの差を示します。" : "研究仮説に合わせてTargetを設定できます。"}`;
 }
 function labelPhone(slot) { $("#state" + slot).textContent = phones[slot].stream ? `接続中 · ID ${phones[slot].sessionId.slice(0, 8)}` : "接続待ち"; }
 function clearPhone(slot) {

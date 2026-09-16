@@ -4,7 +4,8 @@ import { ANGLES, POSITIONS, LABELS, evaluate, sampleValue } from "./experiment-m
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const colors = ["#c9ff39", "#66e1ef", "#ff9c70"];
-const DEFAULTS = { timing: "concurrent", type: "KP", amount: "detailed", angleSide: "left", positionSide: "midpoint", angles: ["knee", "hip", "trunk"], positions: [], visuals: { numeric: true, skeleton: true, trajectory: false, waveform: false, target: false }, targets: Object.fromEntries(ANGLES.map(key => [key, { enabled: key === "knee", value: key === "knee" ? 90 : 30, tolerance: 5 }])) };
+const DEFAULTS = { timing: "concurrent", type: "KP", amount: "detailed", camera: "on", angleSide: "left", positionSide: "midpoint", angles: ["knee", "hip", "trunk"], positions: [], visuals: { numeric: true, skeleton: true, trajectory: false, waveform: false, target: false }, targets: Object.fromEntries(ANGLES.map(key => [key, { enabled: key === "knee", value: key === "knee" ? 90 : 30, tolerance: 5 }])) };
+const ANGLE_POINTS = { knee: [23, 25, 27], hip: [11, 23, 25], ankle: [25, 27, 31] };
 const format = value => Number.isFinite(value) ? value.toFixed(1) : "—";
 const csvCell = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
 const size = bytes => bytes < 1048576 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
@@ -16,7 +17,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
   const angleChecks = ANGLES.map(key => `<label><input type="checkbox" data-angle="${key}" ${settings.angles.includes(key) ? "checked" : ""}>${LABELS[key] || key}</label>`).join("");
   const positionChecks = POSITIONS.map(key => `<label><input type="checkbox" data-position="${key}">${LABELS[key] || key}</label>`).join("");
   const targetInputs = ANGLES.map(key => `<label><input type="checkbox" data-target-enabled="${key}" ${settings.targets[key].enabled ? "checked" : ""}>${LABELS[key] || key}<input type="number" data-target-value="${key}" value="${settings.targets[key].value}" aria-label="${key} target">±<input type="number" min="0" data-target-tolerance="${key}" value="5" aria-label="${key} tolerance">°</label>`).join("");
-  $(".workspace").insertAdjacentHTML("afterend", `<section class="experiment-panel" aria-label="Visual Biofeedback設定"><h2>FEEDBACK / 実験設定</h2><div class="experiment-grid">
+  $(".workspace").insertAdjacentHTML("afterend", `<section class="experiment-panel" aria-label="Visual Biofeedback設定"><h2>FEEDBACK / 実験設定</h2><div class="camera-display-control"><span>LIVE CAMERA VIDEO</span><div class="experiment-tabs" data-group="camera"><button type="button" data-value="on" class="active">映像 ON</button><button type="button" data-value="off">映像 OFF</button></div><small>映像OFFでもスケルトン・選択したFBを表示し、カメラ入力・Pose推定・録画は継続します。</small></div><div class="experiment-grid">
     <fieldset><legend>WHEN / Timing</legend><div class="experiment-tabs" data-group="timing"><button type="button" data-value="none">No BF</button><button type="button" data-value="concurrent" class="active">Concurrent</button><button type="button" data-value="terminal">Terminal</button></div></fieldset>
     <fieldset><legend>WHAT / Feedback Type</legend><div class="experiment-tabs" data-group="type"><button type="button" data-value="KR">KR / 結果</button><button type="button" data-value="KP" class="active">KP / 過程</button></div></fieldset>
     <fieldset><legend>HOW MUCH / Amount</legend><div class="experiment-tabs" data-group="amount"><button type="button" data-value="simple">Simple</button><button type="button" data-value="detailed" class="active">Detailed</button></div></fieldset>
@@ -45,6 +46,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     $("#liveWave").hidden = !(liveVisible() && settings.type === "KP" && settings.visuals.waveform && settings.amount === "detailed");
     Object.values(views).forEach(view => {
       view.root.classList.toggle("feedback-suppressed", !liveVisible());
+      view.root.classList.toggle("camera-video-off", settings.camera === "off");
       decorate(view, sourceState(view.source));
     });
     drawLiveWaves(); onSettingsChange({ visible: liveVisible(), settings: snapshot() });
@@ -97,16 +99,58 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       points.forEach((point, i) => i ? ctx.lineTo(point.x * ctx.canvas.width, point.y * ctx.canvas.height) : ctx.moveTo(point.x * ctx.canvas.width, point.y * ctx.canvas.height)); ctx.stroke();
     });
   }
+  function drawSelectedVariables(ctx, entry, view) {
+    if (!entry) return;
+    const p = entry.landmarks, width = ctx.canvas.width, height = ctx.canvas.height;
+    const offset = settings.angleSide === "right" ? 1 : 0;
+    const point = index => ({ x: p[index].x * width, y: p[index].y * height });
+    const label = (text, x, y, color) => {
+      ctx.save(); ctx.font = `${Math.max(16, width / 75)}px sans-serif`; ctx.textBaseline = "middle";
+      const padding = 5, textWidth = ctx.measureText(text).width;
+      ctx.fillStyle = "#0b0d0fdb"; ctx.fillRect(x - padding, y - 12, textWidth + padding * 2, 24);
+      ctx.fillStyle = color;
+      if (view.source === "pc") { ctx.translate(x + textWidth, 0); ctx.scale(-1, 1); ctx.fillText(text, 0, y); }
+      else ctx.fillText(text, x, y);
+      ctx.restore();
+    };
+    settings.angles.forEach((key, index) => {
+      const color = colors[index % colors.length], joints = ANGLE_POINTS[key]?.map(id => point(id + offset));
+      let first, pivot, last;
+      if (joints) [first, pivot, last] = joints;
+      else {
+        const shoulder = point(11 + offset), end = key === "headNeck" ? point(7 + offset) : shoulder;
+        pivot = key === "headNeck" ? shoulder : point(23 + offset);
+        first = { x: pivot.x, y: end.y }; last = end;
+      }
+      ctx.save(); ctx.lineWidth = Math.max(3, width / 350); ctx.strokeStyle = color; ctx.fillStyle = color;
+      ctx.beginPath(); ctx.moveTo(first.x, first.y); ctx.lineTo(pivot.x, pivot.y); ctx.lineTo(last.x, last.y); ctx.stroke();
+      const a = Math.atan2(first.y - pivot.y, first.x - pivot.x), b = Math.atan2(last.y - pivot.y, last.x - pivot.x);
+      const delta = ((b - a + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+      ctx.beginPath(); ctx.arc(pivot.x, pivot.y, Math.max(22, width / 30), a, a + delta, delta < 0); ctx.stroke();
+      ctx.beginPath(); ctx.arc(pivot.x, pivot.y, Math.max(5, width / 180), 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      if (settings.visuals.numeric) label(`${LABELS[key] || key} ${format(entry.angles[key])}°`, pivot.x + 14, pivot.y - 20 - index * 4, color);
+    });
+    settings.positions.forEach((key, index) => {
+      const position = entry.positions[key]; if (!position) return;
+      const x = position.x * width, y = position.y * height, color = colors[(index + 1) % colors.length];
+      ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = Math.max(3, width / 350);
+      ctx.beginPath(); ctx.arc(x, y, Math.max(9, width / 110), 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x - 15, y); ctx.lineTo(x + 15, y); ctx.moveTo(x, y - 15); ctx.lineTo(x, y + 15); ctx.stroke(); ctx.restore();
+      if (settings.visuals.numeric) label(`${LABELS[key] || key} X${format(position.x)} Y${format(position.y)}`, x + 18, y + 18, color);
+    });
+  }
   function decorate(view, state) {
     const canvas = view.canvas, ctx = canvas.getContext("2d"); ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const points = state.landmarks, recent = live[view.root.dataset.view], entry = recent.at(-1);
+    const recent = live[view.root.dataset.view], entry = recent.at(-1), points = state.landmarks || entry?.landmarks;
     if (entry) for (const key of ["knee", "hip", "trunk"]) {
       const number = entry.angles[key], metric = $(`[data-metric="${key}"]`, view.root), bar = $(`[data-bar="${key}"]`, view.root);
       metric.innerHTML = `${format(number)}<small>°</small>`;
       bar.style.width = `${Math.max(0, Math.min(100, key === "trunk" ? number * 2 : number / 1.8))}%`;
     }
     const display = liveVisible(), detailed = settings.amount === "detailed", kp = settings.type === "KP";
-    if (display && kp && settings.visuals.skeleton && points) draw(canvas, points);
+    if (display && (settings.visuals.skeleton || settings.camera === "off") && points) draw(canvas, points);
+    if (display && kp && entry) drawSelectedVariables(ctx, entry, view);
     if (display && kp && detailed && settings.visuals.trajectory && entry) drawTrail(ctx, recent, entry.t);
     const values = $(".experiment-values", view.root), target = $(".experiment-target", view.root);
     values.hidden = !(display && kp && detailed && settings.visuals.numeric);
@@ -132,6 +176,10 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       } else bar.style.background = "";
     }
     $(".metrics", view.root).style.visibility = display && kp && settings.visuals.numeric && detailed ? "visible" : "hidden";
+    for (const key of ["knee", "hip", "trunk"]) {
+      const metric = $(`[data-metric="${key}"]`, view.root).closest(".metric");
+      if (metric) metric.hidden = !settings.angles.includes(key);
+    }
   }
 
   function wave(canvas, samples, config, cursor = null) {

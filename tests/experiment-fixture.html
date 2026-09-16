@@ -1,4 +1,4 @@
-<!doctype html><html lang="ja"><head><meta charset="utf-8"><link rel="stylesheet" href="../src/styles.css"><link rel="stylesheet" href="../src/experiment.css"></head><body>
+<!doctype html><html lang="ja"><head><meta charset="utf-8"><link rel="stylesheet" href="../src/styles.css"><link rel="stylesheet" href="../src/remote-display.css"><link rel="stylesheet" href="../src/experiment.css"></head><body>
 <div class="workspace">
 <article class="camera-panel" data-view="front"><div class="viewport"><video></video><canvas></canvas></div><div class="metrics"><strong data-metric="knee"></strong><i data-bar="knee"></i><strong data-metric="hip"></strong><i data-bar="hip"></i><strong data-metric="trunk"></strong><i data-bar="trunk"></i></div></article>
 <article class="camera-panel" data-view="side"><div class="viewport"><video></video><canvas></canvas></div><div class="metrics"><strong data-metric="knee"></strong><i data-bar="knee"></i><strong data-metric="hip"></strong><i data-bar="hip"></i><strong data-metric="trunk"></strong><i data-bar="trunk"></i></div></article>
@@ -12,6 +12,16 @@ try {
   }));
   const experiment = createExperiment({ views, sourceState: () => ({ stream: null, landmarks: null }), onSettingsChange: () => {} });
   const points = Array.from({ length: 33 }, (_, index) => ({ x: .3 + index / 100, y: .2 + index / 120, z: 0, visibility: 1 }));
+  experiment.sample("A", points); experiment.sample("B", points); experiment.refreshSettings();
+  const checksum = canvas => canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data.reduce((sum, value) => sum + value, 0);
+  const beforeToggle = checksum(views.front.canvas);
+  document.querySelector('[data-angle="knee"]').click();
+  if (checksum(views.front.canvas) === beforeToggle) throw new Error("Angle checkbox did not update overlay immediately");
+  document.querySelector('[data-angle="knee"]').click();
+  document.querySelector('[data-group="camera"] [data-value="off"]').click();
+  if (getComputedStyle(views.front.video).visibility !== "hidden" || checksum(views.front.canvas) === 0) throw new Error("Camera video OFF hid the skeleton or kept video visible");
+  document.querySelector('[data-group="camera"] [data-value="on"]').click();
+  if (getComputedStyle(views.front.video).visibility === "hidden") throw new Error("Camera video ON did not restore video");
   document.querySelector('[data-position="hip"]').click();
   if (document.querySelector('[data-visual="trajectory"]').disabled) throw new Error("Trajectory remained disabled");
   document.querySelector('[data-group="timing"] [data-value="terminal"]').click();
@@ -34,6 +44,8 @@ try {
   if (document.querySelectorAll("#trialHistory .trial-item").length !== 4 || !document.querySelector("#trialSummary").textContent.includes("No BF")) throw new Error("No BF did not retain an unreported trial");
   for (let i = 0; i < 8; i++) { experiment.beginTrial(); experiment.sample("A", points); experiment.endTrial({}); }
   if (document.querySelectorAll("#trialHistory .trial-item").length !== 10 || document.querySelector("#trialHistory").textContent.includes("Trial 01")) throw new Error("10-Trial retention failed");
-  document.querySelector("#result").textContent = "PASS: older replay, skeleton-only, waveform/seek, trajectory, No BF, 10-Trial cap";
+  document.querySelector('[data-group="timing"] [data-value="concurrent"]').click();
+  if (views.front.root.classList.contains("feedback-suppressed")) throw new Error("Concurrent did not restore live feedback");
+  document.querySelector("#result").textContent = "PASS: live variable overlay, camera video toggle, older replay, waveform/seek, No BF, 10-Trial cap";
 } catch (error) { document.querySelector("#result").textContent = `FAIL: ${error.stack || error}`; }
 </script></body></html>

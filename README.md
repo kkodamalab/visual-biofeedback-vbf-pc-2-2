@@ -32,7 +32,7 @@ python -m http.server 4173
 
 ## 簡易テスト
 
-`node --test tests/experiment-math.test.mjs`で計測式を確認できます。`/tests/experiment-fixture.html`は合成Poseで複数Trial・過去Trial Replay・No BF・Seek・10件上限をブラウザ検証します。実カメラ／2台WebRTC／0.5×は使用端末で確認してください。
+`node --test tests/experiment-math.test.mjs`で計測式を確認できます。`/tests/experiment-fixture.html`は合成Poseで変数ON/OFF即時描画、映像ON/OFF、複数Trial・過去Trial Replay・No BF・Seek・10件上限をブラウザ検証します。実カメラ／2台WebRTC／0.5×は使用端末で確認してください。
 
 ## 実装済み機能
 
@@ -59,6 +59,8 @@ python -m http.server 4173
 - A/BそれぞれのQRコードと端末ごとに固有のSession IDを用いたWebRTC接続。スマートフォンで各QRを開き、カメラを開始してください。
 - 各視点で映像、Skeleton、角度、Visual Feedbackを表示。PC映像はPCで、Remote映像はスマートフォンでPose推定します。2視点の生映像を同時録画して個別に保存できます。
 - Dashboardの実験設定: No BF／Concurrent／Terminal、KR／KP、Simple／Detailed、5角度・7位置の複数選択、Numeric／Skeleton／Trajectory／Waveform／Targetの個別ON/OFF。
+- Concurrentでは選択した角度だけを関節の弧・基準線・数値、選択したPositionだけをマーカー・座標として映像上へ重ねます。チェックの変更は即時反映され、基本スケルトンは独立表示です。
+- Live Camera VideoをON/OFF可能。OFFは映像の表示だけを隠し、カメラ入力・Pose推定・録画を継続します。QRはA/Bを離した独立カードです。
 - ユーザー指定のAngle Target／Toleranceを複数設定。Concurrentは映像上の値・差とTarget zone、Terminalは終了後のReplay・波形・結果要約で比較します。
 - 録画開始〜停止を1 Trialとして映像・正規化Landmark・5角度・7位置・設定・時刻をメモリに保持。最大10 Trialまたは概ね500 MB（最新Trialは保持）。個別／全削除、任意のTrialをPlay／Pause／Seek／速度変更、動画・Skeleton・軌跡・数値・波形の切替、波形クリックSeek、Trial／全Trial CSV、各映像Download。
 - iPhoneの背面／インカメラ切替
@@ -77,6 +79,7 @@ python -m http.server 4173
 - 2台同時取得の可否、最大解像度、録画形式はカメラドライバとブラウザに依存します。
 - MediaRecorderが出力する映像形式はブラウザによって異なります。
 - MediaPipe本体とモデルはCDNから取得するため、初回読み込みに通信が必要です。
+- Face Landmarker／MediaFaceモデルは使用していません。Poseの汎用スケルトン描画では顔周辺の点を省略しています（Head/Neck角度の計測にはPoseの耳ランドマークを使用）。
 - スマートフォンでカメラ開始・権限許可後にデバイス名が公開されます。ブラウザが物理Ultra Wideを独立した`videoinput`として識別可能な名称で公開しない場合、0.5×は無効です。CSS縮小やデジタルズームによる代用はしません。手動カメラ選択は残しています。
 - レンズ切替は各スマートフォン画面で独立します。録画映像は生映像で、Skeleton・数値の焼き込みはありません。保存したLandmarkをReplayのOverlayに用います。ブラウザが対応するMediaRecorder形式に依存します。
 - 実機での0.5×選択と映像・Pose再開は、使用する端末・ブラウザで確認してください。
