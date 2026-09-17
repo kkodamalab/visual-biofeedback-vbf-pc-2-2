@@ -2,7 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { selectedPositionSegments } from "../src/position-connections.js";
 import { lowPassSamples, estimatedNyquistHz } from "../src/wave-filter.js";
-import { TargetEntryGate } from "../src/target-beep.js";
+import { TargetEntryGate, BEEP_SOUNDS } from "../src/target-beep.js";
+
+test("five distinct Web Audio presets remain short and have unique IDs", () => {
+  assert.equal(BEEP_SOUNDS.length, 5);
+  assert.equal(new Set(BEEP_SOUNDS.map(sound => sound.id)).size, 5);
+  for (const sound of BEEP_SOUNDS) {
+    assert.ok(sound.tones.length >= 1);
+    assert.ok(sound.tones.every(tone => tone.frequency > 0 && tone.duration > 0 && (tone.delay || 0) + tone.duration < .5));
+  }
+});
 
 test("selected positions connect adjacent anatomical segments without crossing sides", () => {
   const segments = selectedPositionSegments(["shoulder", "hip", "knee", "wrist"], ["left", "right"]);

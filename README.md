@@ -65,7 +65,7 @@ python -m http.server 4173
 - Angle SIDEはLeft／Rightを独立選択可能。Knee／Hip／Ankleは左右別に計測・描画・波形・CSV保存します。Trunk／Head–Neckは従来の計算定義を保ち、両側選択時はLeft、Rightのみ選択時はRightの1系列として表示します。
 - Positionの「Connect selected positions」は通常Skeletonから独立し、選択した解剖学的な隣接点だけを左右別に結びます。WristはShoulderからの分岐です。接続ON中の点・線はAngle SIDEのLeft／Rightに従い、位置の数値・波形・CSVは従来どおりPosition側のMidpoint／Left／Right選択に従います。
 - WaveformはRaw／Low-passを切替可能。初期Cutoffは6 Hz。実測フレーム間隔の中央値から推定Nyquist上限を更新し、各サンプル間隔でもCutoffをNyquist未満に制限する因果的1次RCフィルタを表示時に適用します。保存するRaw landmark／角度／位置は上書きしません。Replay波形にもTrial時点のFilter設定を適用します。
-- Angle TargetごとにBeepをON/OFF可能。選択したFront／Sideの1視点から、Target±Toleranceへの進入を2フレームで確定し、退出2フレーム・ヒステリシス・最短600 ms間隔で再発音を制御します。複数同時到達は120 ms以内の音をまとめます。Test BeepでWeb Audio音声を確認できます。
+- Angle TargetごとにBeepをON/OFF可能。音色は従来音・明瞭な高音・低めのアラート・ダブルBeep・上昇チャイムの5種類から選び、音量を20–100%で調整できます。Test Beepで選択音をその場で比較できます。選択したFront／Sideの1視点から、Target±Toleranceへの進入を2フレームで確定し、退出2フレーム・ヒステリシス・最短600 ms間隔で再発音を制御します。複数同時到達は120 ms以内の音をまとめます。
 - Concurrentでは選択した角度だけを関節の弧・基準線・数値、選択したPositionだけをマーカー・座標として映像上へ重ねます。チェックの変更は即時反映され、基本スケルトンは独立表示です。
 - Live Camera VideoをON/OFF可能。OFFは映像の表示だけを隠し、カメラ入力・Pose推定・録画を継続します。QRはA/Bを離した独立カードです。
 - 映像とSkeletonを独立切替。Skeleton線幅・Joint marker sizeはそれぞれ共通5段階（初期3）。選択した最大3系列の波形は各視点の映像直下に表示し、OFF時は領域を消します。
@@ -85,6 +85,7 @@ python -m http.server 4173
 - KRはユーザー設定TargetとTrialの最深部（選択側のKnee角度が最小のフレーム）および所要時間の要約、KPは経過中の値・軌跡・波形を示します。Depth%は膝角度からの簡易表示で、競技判定や医学的基準ではありません。
 - Live GaugeはConcurrent・KPで表示し、Target±Toleranceの範囲内を「到達」として示します。数値の大小だけで動作の良否を判定するものではありません。Positionゲージの目標は画像内座標であり、実空間位置ではありません。
 - BeepはConcurrent時のみ鳴らし、No BF／Terminal中のリアルタイム音声提示はしません。Beep設定はVisual Target表示と独立です。ブラウザの音声再生制限のため、Beep ONまたはTest Beepのユーザー操作でAudioContextを有効化する必要があります。
+- 音色・音量の聞こえ方はPC／プロジェクタのスピーカーやOS音量に依存します。授業前にTest Beepで確認してください。音声はアプリ内で生成し、外部ファイルを読み込みません。
 - Trialはタブのメモリ内のみです。リロード／閉じると消えます。残したい試技はCSVと映像をダウンロードしてください。グループ間の共有DBはありません。録画は最大5分または約450 MBで自動停止し、Historyは最大10 Trial・概ね500 MBで古いものから解放します。
 - Remoteの映像とPoseデータはWebRTCで別々に到着するため、Replayの動画と波形には通信遅延程度のずれがあり得ます。ハードウェア同期ではありません。
 - 角度と左右差は2D投影上の簡易指標です。3D再構成・カメラ校正・競技判定は行いません。

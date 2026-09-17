@@ -3,12 +3,12 @@ import { ANGLES, POSITIONS, LABELS, BILATERAL_ANGLES, evaluate, sampleValue, ang
 import { gaugeVariables, gaugeState } from "./gauge.js";
 import { selectedPositionSegments, positionForSide } from "./position-connections.js";
 import { lowPassSamples, estimatedNyquistHz } from "./wave-filter.js";
-import { TargetEntryGate, unlockBeepAudio, playBeepTone } from "./target-beep.js";
+import { TargetEntryGate, BEEP_SOUNDS, unlockBeepAudio, playBeepTone } from "./target-beep.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const colors = ["#c9ff39", "#66e1ef", "#ff9c70"];
-const DEFAULTS = { timing: "concurrent", type: "KP", amount: "detailed", camera: "on", gaugeDirection: "horizontal", skeletonWidth: 3, markerSize: 3, angleSide: "left", angleSides: ["left"], positionSide: "midpoint", connectPositions: false, waveLowPass: false, waveCutoffHz: 6, beepView: "side", angles: ["knee", "hip", "trunk"], positions: [], visuals: { numeric: true, skeleton: true, trajectory: false, waveform: false, gauge: false, target: false }, targets: Object.fromEntries([...ANGLES.map(key => [key, { enabled: key === "knee", beep: false, value: key === "knee" ? 90 : 30, tolerance: 5 }]), ...POSITIONS.flatMap(name => ["x", "y"].map(axis => [`${name}.${axis}`, { enabled: false, beep: false, value: .5, tolerance: .05 }]))]) };
+const DEFAULTS = { timing: "concurrent", type: "KP", amount: "detailed", camera: "on", gaugeDirection: "horizontal", skeletonWidth: 3, markerSize: 3, angleSide: "left", angleSides: ["left"], positionSide: "midpoint", connectPositions: false, waveLowPass: false, waveCutoffHz: 6, beepView: "side", beepSound: "clear", beepVolume: 80, angles: ["knee", "hip", "trunk"], positions: [], visuals: { numeric: true, skeleton: true, trajectory: false, waveform: false, gauge: false, target: false }, targets: Object.fromEntries([...ANGLES.map(key => [key, { enabled: key === "knee", beep: false, value: key === "knee" ? 90 : 30, tolerance: 5 }]), ...POSITIONS.flatMap(name => ["x", "y"].map(axis => [`${name}.${axis}`, { enabled: false, beep: false, value: .5, tolerance: .05 }]))]) };
 const ANGLE_POINTS = { knee: [23, 25, 27], hip: [11, 23, 25], ankle: [25, 27, 31] };
 const format = value => Number.isFinite(value) ? value.toFixed(1) : "—";
 const csvCell = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
@@ -28,7 +28,7 @@ export function createExperiment({ views, sourceState, onSettingsChange, beep = 
     <fieldset><legend>WHAT / Feedback Type</legend><div class="experiment-tabs" data-group="type"><button type="button" data-value="KR">KR / 結果</button><button type="button" data-value="KP" class="active">KP / 過程</button></div></fieldset>
     <fieldset><legend>HOW MUCH / Amount</legend><div class="experiment-tabs" data-group="amount"><button type="button" data-value="simple">Simple</button><button type="button" data-value="detailed" class="active">Detailed</button></div></fieldset>
   </div><details open><summary>Variables / 計測変数</summary><div class="experiment-grid"><fieldset><legend>ANGLES</legend>${angleChecks}<div class="angle-side-choices"><strong>SIDE</strong><label><input type="checkbox" data-angle-side="left" checked>Left</label><label><input type="checkbox" data-angle-side="right">Right</label></div><small>Trunk / Head–Neckは1系列（両側選択時はLeft）</small></fieldset><fieldset><legend>POSITIONS (normalized 0–1)</legend>${positionChecks}<div><label>位置の側 <select id="positionSide"><option value="midpoint">Midpoint</option><option value="left">Left</option><option value="right">Right</option></select></label></div><label><input type="checkbox" id="connectPositions">Connect selected positions</label><small>接続線は選択したSIDEごとに解剖学的な隣接点だけ結びます</small></fieldset><fieldset><legend>HOW / Visualization</legend>${["numeric", "skeleton", "trajectory", "waveform", "gauge", "target"].map(key => `<label><input type="checkbox" data-visual="${key}" ${settings.visuals[key] ? "checked" : ""}>${key}</label>`).join("")}<div class="wave-filter-control"><label><input type="checkbox" id="waveLowPass">Low-pass filter</label><label>Cutoff <input type="number" id="waveCutoffHz" min="0.1" max="15" step="0.1" value="6">Hz</label><small id="waveNyquist">推定Nyquist: 未計測（上限15 Hz）</small></div><label>Gauge direction <select id="gaugeDirection"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label><div class="display-levels"><label>Skeleton line width <input type="range" min="1" max="5" step="1" value="3" data-level="skeletonWidth"><output data-level-output="skeletonWidth">3</output></label><label>Joint marker size <input type="range" min="1" max="5" step="1" value="3" data-level="markerSize"><output data-level-output="markerSize">3</output></label></div><small id="visualHint">TrajectoryはPosition選択時に利用可能</small></fieldset></div></details>
-  <details><summary>Target / 仮説に基づく目標値</summary><div class="experiment-target-grid">${targetInputs}</div><div class="beep-controls"><label>Beep source <select id="beepView"><option value="side">Side View</option><option value="front">Front View</option></select></label><button type="button" id="testBeep">Test Beep ♪</button><small id="beepStatus">BeepはTargetへの進入時に1回。音声は操作後に有効化します。</small></div><div class="experiment-target-grid position-targets">${positionTargetInputs}</div><small>Gaugeは現在値と設定した目標±許容幅を表示します。Positionの目標は画像内の正規化座標0–1です。固定の「正解」ではありません。</small></details></section>`);
+  <details><summary>Target / 仮説に基づく目標値</summary><div class="experiment-target-grid">${targetInputs}</div><div class="beep-controls"><label>Beep source <select id="beepView"><option value="side">Side View</option><option value="front">Front View</option></select></label><label>Beep sound <select id="beepSound">${BEEP_SOUNDS.map(sound => `<option value="${sound.id}" ${sound.id === settings.beepSound ? "selected" : ""}>${sound.label}</option>`).join("")}</select></label><label>Volume <input type="range" id="beepVolume" min="20" max="100" step="10" value="80"><output id="beepVolumeOutput">80%</output></label><button type="button" id="testBeep">Test Beep ♪</button><small id="beepStatus">BeepはTargetへの進入時に1回。音声は操作後に有効化します。</small></div><div class="experiment-target-grid position-targets">${positionTargetInputs}</div><small>Gaugeは現在値と設定した目標±許容幅を表示します。Positionの目標は画像内の正規化座標0–1です。固定の「正解」ではありません。</small></details></section>`);
   $(".remote-record").insertAdjacentHTML("afterend", `<section class="trial-panel"><div class="trial-head"><h2>TRIALS / REPLAY</h2><small id="trialStorage">0 Trial · 0 KB / 500 MB</small></div><div id="trialHistory" class="trial-history">まだTrialはありません</div><p id="trialSummary" class="trial-summary">録画開始〜停止が1 Trialです。データはこのブラウザのメモリに保持され、ページを閉じると消去されます。</p><div class="trial-actions"><button id="exportTrial" type="button" disabled>選択Trial CSV</button><button id="exportAllTrials" type="button" disabled>全Trial CSV</button><button id="deleteAllTrials" type="button" disabled>全Trialを削除</button></div></section>`);
   document.body.insertAdjacentHTML("beforeend", `<section id="experimentReplay" class="replay-modal" role="dialog" aria-label="Trial Replay" hidden><div class="replay-head"><h2 id="replayTitle">Trial Replay</h2><button id="closeExperimentReplay" type="button">閉じる ×</button></div><div class="replay-options">${["video", "skeleton", "trajectory", "numeric", "waveform", "target"].map(key => `<label><input type="checkbox" data-replay-option="${key}" ${["video", "skeleton", "numeric", "waveform", "target"].includes(key) ? "checked" : ""}>${key}</label>`).join("")}</div><details><summary>Replay変数を選択</summary><div class="replay-options">${ANGLES.map(key => `<label><input type="checkbox" data-replay-angle="${key}">${LABELS[key] || key}</label>`).join("")}${POSITIONS.map(key => `<label><input type="checkbox" data-replay-position="${key}">${LABELS[key] || key} position</label>`).join("")}</div></details><div class="replay-grid">${["front", "side"].map(name => `<div class="replay-view" data-replay-view="${name}"><strong>${name.toUpperCase()}</strong><div class="replay-viewport"><video playsinline muted></video><canvas></canvas></div><div class="replay-values"></div></div>`).join("")}</div><div class="replay-controls"><button id="replayPlay" type="button">▶ Play</button><input id="replaySeek" type="range" min="0" max="1000" value="0" aria-label="Replay Seek"><span id="replayTime">0.0 s</span><label>Speed <select id="replaySpeed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option></select></label></div><div class="replay-wave"><canvas data-replay-wave="front"></canvas><canvas data-replay-wave="side"></canvas></div></section>`);
   for (const view of Object.values(views)) {
@@ -87,6 +87,7 @@ export function createExperiment({ views, sourceState, onSettingsChange, beep = 
     if (el.id === "waveLowPass") settings.waveLowPass = el.checked;
     if (el.id === "waveCutoffHz") { settings.waveCutoffHz = Math.max(.1, Math.min(+el.max || 15, +el.value || 6)); el.value = String(settings.waveCutoffHz); }
     if (el.id === "beepView") { settings.beepView = el.value; beepGate.reset(); }
+    if (el.id === "beepSound") settings.beepSound = el.value;
     if (["angleSide", "positionSide", "gaugeDirection"].includes(el.id)) settings[el.id] = el.value;
     if (el.dataset.targetEnabled) settings.targets[el.dataset.targetEnabled].enabled = el.checked;
     if (el.dataset.targetValue) settings.targets[el.dataset.targetValue].value = +el.value;
@@ -99,8 +100,13 @@ export function createExperiment({ views, sourceState, onSettingsChange, beep = 
     refreshSettings();
   });
   $("#testBeep").addEventListener("click", async () => {
-    try { await unlockAudio(); if (beep() === false) throw new Error("音声出力を開始できませんでした"); $("#beepStatus").textContent = "Test Beepを再生しました"; }
+    try { await unlockAudio(); if (beep(settings.beepSound, settings.beepVolume / 100) === false) throw new Error("音声出力を開始できませんでした"); $("#beepStatus").textContent = `${BEEP_SOUNDS.find(sound => sound.id === settings.beepSound)?.label}を再生しました`; }
     catch (error) { $("#beepStatus").textContent = error.message; }
+  });
+  $("#beepVolume").addEventListener("input", event => {
+    settings.beepVolume = +event.target.value;
+    $("#beepVolumeOutput").value = `${settings.beepVolume}%`;
+    onSettingsChange({ visible: liveVisible(), settings: snapshot() });
   });
   $(".experiment-panel").addEventListener("input", event => {
     const key = event.target.dataset.level;
@@ -126,7 +132,7 @@ export function createExperiment({ views, sourceState, onSettingsChange, beep = 
       if (current) current.samples[name].push(entry);
       if (name === settings.beepView && liveVisible()) for (const key of angleVariables(settings)) {
         const target = settings.targets[angleTargetKey(key)];
-        if (beepGate.update(key, sampleValue(entry, key), target, now) && now - lastBeepAudioAt >= 120) { beep(); lastBeepAudioAt = now; }
+        if (beepGate.update(key, sampleValue(entry, key), target, now) && now - lastBeepAudioAt >= 120) { beep(settings.beepSound, settings.beepVolume / 100); lastBeepAudioAt = now; }
       }
     }
     updateCutoffLimit();
@@ -372,7 +378,7 @@ export function createExperiment({ views, sourceState, onSettingsChange, beep = 
         ...Object.fromEntries(["left", "right"].flatMap(side => BILATERAL_ANGLES.map(key => [`${side}_${key}`, sample.anglesBySide?.[side]?.[key]]))),
         ...Object.fromEntries(POSITIONS.flatMap(key => [[`${key}_x`, sample.positions[key]?.x], [`${key}_y`, sample.positions[key]?.y]])),
         angle_side: trial.settings.angleSide, angle_sides: trial.settings.angleSides || [trial.settings.angleSide], position_side: trial.settings.positionSide,
-        connect_positions: trial.settings.connectPositions, wave_low_pass: trial.settings.waveLowPass, wave_cutoff_hz: trial.settings.waveCutoffHz, beep_view: trial.settings.beepView,
+        connect_positions: trial.settings.connectPositions, wave_low_pass: trial.settings.waveLowPass, wave_cutoff_hz: trial.settings.waveCutoffHz, beep_view: trial.settings.beepView, beep_sound: trial.settings.beepSound, beep_volume: trial.settings.beepVolume,
         feedback_timing: trial.settings.timing, feedback_type: trial.settings.type, feedback_amount: trial.settings.amount,
         selected_angles: trial.settings.angles, selected_positions: trial.settings.positions, visualizations: trial.settings.visuals,
         targets: trial.settings.targets, landmarks: sample.landmarks });

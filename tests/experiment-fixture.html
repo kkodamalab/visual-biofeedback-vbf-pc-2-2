@@ -6,12 +6,12 @@
 <script type="module">
 import { createExperiment } from "../src/experiment.js";
 try {
-  let beepCount = 0;
+  let beepCount = 0, lastSound = null;
   const views = Object.fromEntries(["front", "side"].map(name => {
     const root = document.querySelector(`[data-view=${name}]`);
     return [name, { root, video: root.querySelector("video"), canvas: root.querySelector("canvas"), source: name === "front" ? "A" : "B" }];
   }));
-  const experiment = createExperiment({ views, sourceState: () => ({ stream: null, landmarks: null }), onSettingsChange: () => {}, beep: () => { beepCount++; return true; }, unlockAudio: async () => {} });
+  const experiment = createExperiment({ views, sourceState: () => ({ stream: null, landmarks: null }), onSettingsChange: () => {}, beep: (sound, volume) => { beepCount++; lastSound = { sound, volume }; return true; }, unlockAudio: async () => {} });
   const points = Array.from({ length: 33 }, (_, index) => ({ x: .3 + index / 100, y: .2 + index / 120, z: 0, visibility: 1 }));
   experiment.sample("A", points); experiment.sample("B", points); experiment.refreshSettings();
   document.querySelector('[data-visual="gauge"]').click();
@@ -71,13 +71,17 @@ try {
   document.querySelector('#waveLowPass').click();
   if (!experiment.settings.waveLowPass) throw new Error("Low-pass checkbox did not update settings");
   document.querySelector('#waveLowPass').click();
+  const soundChoice = document.querySelector('#beepSound');
+  if (soundChoice.options.length !== 5) throw new Error("Five beep sounds are not available");
+  soundChoice.value = 'double'; soundChoice.dispatchEvent(new Event('change', { bubbles: true }));
+  const beepVolume = document.querySelector('#beepVolume'); beepVolume.value = '100'; beepVolume.dispatchEvent(new Event('input', { bubbles: true }));
   document.querySelector('#testBeep').click();
   await Promise.resolve();
-  if (beepCount !== 1) throw new Error("Test Beep did not play");
+  if (beepCount !== 1 || lastSound.sound !== 'double' || lastSound.volume !== 1) throw new Error("Test Beep did not use selected sound and volume");
   document.querySelector('[data-target-beep="knee"]').click();
   await Promise.resolve();
   experiment.sample("B", points); experiment.sample("B", points);
-  if (beepCount !== 2) throw new Error("Target entry did not beep once");
+  if (beepCount !== 2 || lastSound.sound !== 'double') throw new Error("Target entry did not use selected sound once");
   experiment.sample("B", points); experiment.sample("B", points);
   if (beepCount !== 2) throw new Error("Target zone continuously beeped");
   document.querySelector('[data-target-beep="knee"]').click();
@@ -107,6 +111,6 @@ try {
   document.querySelector('[data-visual="waveform"]').click();
   experiment.sample("A", points); experiment.sample("B", points); experiment.refreshSettings();
   if (frontGauges.hidden || frontGauges.querySelector('[data-key="left.knee"]').classList.contains('no-value') || views.front.root.querySelector('.experiment-wave').hidden) throw new Error("Gauge and waveform did not coexist during live feedback");
-  document.querySelector("#result").textContent = "PASS: bilateral angles/CSV, position connections, filter switch, beep, gauges, waveform, older replay, No BF, 10-Trial cap";
+  document.querySelector("#result").textContent = "PASS: five beep sounds/volume, bilateral angles/CSV, position connections, filter switch, gauges, waveform, older replay, No BF, 10-Trial cap";
 } catch (error) { document.querySelector("#result").textContent = `FAIL: ${error.stack || error}`; }
 </script></body></html>
