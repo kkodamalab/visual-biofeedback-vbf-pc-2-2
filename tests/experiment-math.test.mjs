@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { angles, position, evaluate, sampleValue } from "../src/experiment-math.js";
+import { angles, position, evaluate, sampleValue, angleVariables } from "../src/experiment-math.js";
 
 function landmarks() {
   const points = Array.from({ length: 33 }, () => ({ x: .5, y: .5, visibility: 1 }));
@@ -30,6 +30,9 @@ test("position is normalized and side or midpoint can be selected", () => {
   assert.equal(sampleValue(sample, "ankle"), 90);
   assert.equal(sampleValue(sample, "hip.x"), .6);
   assert.equal(sampleValue(sample, "wrist.y"), .2);
+  assert.equal(sampleValue(sample, "left.knee"), 180);
+  assert.equal(sampleValue(sample, "right.knee"), 180);
+  assert.deepEqual(angleVariables({ angles: ["knee", "trunk"], angleSides: ["left", "right"] }), ["left.knee", "right.knee", "trunk"]);
 });
 test("angle calculation corrects the normalized X axis for video aspect ratio", () => {
   const points = landmarks();

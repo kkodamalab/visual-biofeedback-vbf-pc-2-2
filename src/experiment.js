@@ -1,30 +1,34 @@
 import { draw } from "./pose.js";
-import { ANGLES, POSITIONS, LABELS, evaluate, sampleValue } from "./experiment-math.js";
+import { ANGLES, POSITIONS, LABELS, BILATERAL_ANGLES, evaluate, sampleValue, angleVariables, variableLabel } from "./experiment-math.js";
 import { gaugeVariables, gaugeState } from "./gauge.js";
+import { selectedPositionSegments, positionForSide } from "./position-connections.js";
+import { lowPassSamples, estimatedNyquistHz } from "./wave-filter.js";
+import { TargetEntryGate, unlockBeepAudio, playBeepTone } from "./target-beep.js";
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const colors = ["#c9ff39", "#66e1ef", "#ff9c70"];
-const DEFAULTS = { timing: "concurrent", type: "KP", amount: "detailed", camera: "on", gaugeDirection: "horizontal", skeletonWidth: 3, markerSize: 3, angleSide: "left", positionSide: "midpoint", angles: ["knee", "hip", "trunk"], positions: [], visuals: { numeric: true, skeleton: true, trajectory: false, waveform: false, gauge: false, target: false }, targets: Object.fromEntries([...ANGLES.map(key => [key, { enabled: key === "knee", value: key === "knee" ? 90 : 30, tolerance: 5 }]), ...POSITIONS.flatMap(name => ["x", "y"].map(axis => [`${name}.${axis}`, { enabled: false, value: .5, tolerance: .05 }]))]) };
+const DEFAULTS = { timing: "concurrent", type: "KP", amount: "detailed", camera: "on", gaugeDirection: "horizontal", skeletonWidth: 3, markerSize: 3, angleSide: "left", angleSides: ["left"], positionSide: "midpoint", connectPositions: false, waveLowPass: false, waveCutoffHz: 6, beepView: "side", angles: ["knee", "hip", "trunk"], positions: [], visuals: { numeric: true, skeleton: true, trajectory: false, waveform: false, gauge: false, target: false }, targets: Object.fromEntries([...ANGLES.map(key => [key, { enabled: key === "knee", beep: false, value: key === "knee" ? 90 : 30, tolerance: 5 }]), ...POSITIONS.flatMap(name => ["x", "y"].map(axis => [`${name}.${axis}`, { enabled: false, beep: false, value: .5, tolerance: .05 }]))]) };
 const ANGLE_POINTS = { knee: [23, 25, 27], hip: [11, 23, 25], ankle: [25, 27, 31] };
 const format = value => Number.isFinite(value) ? value.toFixed(1) : "—";
 const csvCell = value => `"${String(value ?? "").replaceAll('"', '""')}"`;
 const size = bytes => bytes < 1048576 ? `${(bytes / 1024).toFixed(0)} KB` : `${(bytes / 1048576).toFixed(1)} MB`;
 
-export function createExperiment({ views, sourceState, onSettingsChange }) {
+export function createExperiment({ views, sourceState, onSettingsChange, beep = playBeepTone, unlockAudio = unlockBeepAudio }) {
   const settings = structuredClone(DEFAULTS);
   const live = { front: [], side: [] };
-  let current = null, trials = [], nextId = 1, replayTrial = null, replayConfig = null, selectedTrialId = null, replayUrls = [], replayAnimation = 0;
+  const beepGate = new TargetEntryGate();
+  let current = null, trials = [], nextId = 1, replayTrial = null, replayConfig = null, selectedTrialId = null, replayUrls = [], replayAnimation = 0, lastBeepAudioAt = -Infinity;
   const angleChecks = ANGLES.map(key => `<label><input type="checkbox" data-angle="${key}" ${settings.angles.includes(key) ? "checked" : ""}>${LABELS[key] || key}</label>`).join("");
   const positionChecks = POSITIONS.map(key => `<label><input type="checkbox" data-position="${key}">${LABELS[key] || key}</label>`).join("");
-  const targetInputs = ANGLES.map(key => `<label><input type="checkbox" data-target-enabled="${key}" ${settings.targets[key].enabled ? "checked" : ""}>${LABELS[key] || key}<input type="number" data-target-value="${key}" value="${settings.targets[key].value}" aria-label="${key} target">±<input type="number" min="0" data-target-tolerance="${key}" value="5" aria-label="${key} tolerance">°</label>`).join("");
+  const targetInputs = ANGLES.map(key => `<label><input type="checkbox" data-target-enabled="${key}" ${settings.targets[key].enabled ? "checked" : ""}>${LABELS[key] || key}<input type="number" data-target-value="${key}" value="${settings.targets[key].value}" aria-label="${key} target">±<input type="number" min="0" data-target-tolerance="${key}" value="5" aria-label="${key} tolerance">° <span class="beep-choice"><input type="checkbox" data-target-beep="${key}" aria-label="${key} beep">Beep</span></label>`).join("");
   const positionTargetInputs = POSITIONS.flatMap(name => ["x", "y"].map(axis => `<label data-position-target="${name}" hidden><input type="checkbox" data-target-enabled="${name}.${axis}">${LABELS[name] || name} ${axis.toUpperCase()}<input type="number" min="0" max="1" step="0.01" data-target-value="${name}.${axis}" value="0.5" aria-label="${name} ${axis} target">±<input type="number" min="0" max="1" step="0.01" data-target-tolerance="${name}.${axis}" value="0.05" aria-label="${name} ${axis} tolerance"></label>`)).join("");
   $(".workspace").insertAdjacentHTML("afterend", `<section class="experiment-panel" aria-label="Visual Biofeedback設定"><h2>FEEDBACK / 実験設定</h2><div class="camera-display-control"><span>LIVE CAMERA VIDEO</span><div class="experiment-tabs" data-group="camera"><button type="button" data-value="on" class="active">映像 ON</button><button type="button" data-value="off">映像 OFF</button></div><small>映像OFFでも選択したFBを表示し、カメラ入力・Pose推定・録画は継続します。Skeletonは独立して切り替えます。</small></div><div class="experiment-grid">
     <fieldset><legend>WHEN / Timing</legend><div class="experiment-tabs" data-group="timing"><button type="button" data-value="none">No BF</button><button type="button" data-value="concurrent" class="active">Concurrent</button><button type="button" data-value="terminal">Terminal</button></div></fieldset>
     <fieldset><legend>WHAT / Feedback Type</legend><div class="experiment-tabs" data-group="type"><button type="button" data-value="KR">KR / 結果</button><button type="button" data-value="KP" class="active">KP / 過程</button></div></fieldset>
     <fieldset><legend>HOW MUCH / Amount</legend><div class="experiment-tabs" data-group="amount"><button type="button" data-value="simple">Simple</button><button type="button" data-value="detailed" class="active">Detailed</button></div></fieldset>
-  </div><details open><summary>Variables / 計測変数</summary><div class="experiment-grid"><fieldset><legend>ANGLES</legend>${angleChecks}<div><label>角度の側 <select id="angleSide"><option value="left">Left</option><option value="right">Right</option></select></label></div></fieldset><fieldset><legend>POSITIONS (normalized 0–1)</legend>${positionChecks}<div><label>位置の側 <select id="positionSide"><option value="midpoint">Midpoint</option><option value="left">Left</option><option value="right">Right</option></select></label></div></fieldset><fieldset><legend>HOW / Visualization</legend>${["numeric", "skeleton", "trajectory", "waveform", "gauge", "target"].map(key => `<label><input type="checkbox" data-visual="${key}" ${settings.visuals[key] ? "checked" : ""}>${key}</label>`).join("")}<label>Gauge direction <select id="gaugeDirection"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label><div class="display-levels"><label>Skeleton line width <input type="range" min="1" max="5" step="1" value="3" data-level="skeletonWidth"><output data-level-output="skeletonWidth">3</output></label><label>Joint marker size <input type="range" min="1" max="5" step="1" value="3" data-level="markerSize"><output data-level-output="markerSize">3</output></label></div><small id="visualHint">TrajectoryはPosition選択時に利用可能</small></fieldset></div></details>
-  <details><summary>Target / 仮説に基づく目標値</summary><div class="experiment-target-grid">${targetInputs}</div><div class="experiment-target-grid position-targets">${positionTargetInputs}</div><small>Gaugeは現在値と設定した目標±許容幅を表示します。Positionの目標は画像内の正規化座標0–1です。固定の「正解」ではありません。</small></details></section>`);
+  </div><details open><summary>Variables / 計測変数</summary><div class="experiment-grid"><fieldset><legend>ANGLES</legend>${angleChecks}<div class="angle-side-choices"><strong>SIDE</strong><label><input type="checkbox" data-angle-side="left" checked>Left</label><label><input type="checkbox" data-angle-side="right">Right</label></div><small>Trunk / Head–Neckは1系列（両側選択時はLeft）</small></fieldset><fieldset><legend>POSITIONS (normalized 0–1)</legend>${positionChecks}<div><label>位置の側 <select id="positionSide"><option value="midpoint">Midpoint</option><option value="left">Left</option><option value="right">Right</option></select></label></div><label><input type="checkbox" id="connectPositions">Connect selected positions</label><small>接続線は選択したSIDEごとに解剖学的な隣接点だけ結びます</small></fieldset><fieldset><legend>HOW / Visualization</legend>${["numeric", "skeleton", "trajectory", "waveform", "gauge", "target"].map(key => `<label><input type="checkbox" data-visual="${key}" ${settings.visuals[key] ? "checked" : ""}>${key}</label>`).join("")}<div class="wave-filter-control"><label><input type="checkbox" id="waveLowPass">Low-pass filter</label><label>Cutoff <input type="number" id="waveCutoffHz" min="0.1" max="15" step="0.1" value="6">Hz</label><small id="waveNyquist">推定Nyquist: 未計測（上限15 Hz）</small></div><label>Gauge direction <select id="gaugeDirection"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label><div class="display-levels"><label>Skeleton line width <input type="range" min="1" max="5" step="1" value="3" data-level="skeletonWidth"><output data-level-output="skeletonWidth">3</output></label><label>Joint marker size <input type="range" min="1" max="5" step="1" value="3" data-level="markerSize"><output data-level-output="markerSize">3</output></label></div><small id="visualHint">TrajectoryはPosition選択時に利用可能</small></fieldset></div></details>
+  <details><summary>Target / 仮説に基づく目標値</summary><div class="experiment-target-grid">${targetInputs}</div><div class="beep-controls"><label>Beep source <select id="beepView"><option value="side">Side View</option><option value="front">Front View</option></select></label><button type="button" id="testBeep">Test Beep ♪</button><small id="beepStatus">BeepはTargetへの進入時に1回。音声は操作後に有効化します。</small></div><div class="experiment-target-grid position-targets">${positionTargetInputs}</div><small>Gaugeは現在値と設定した目標±許容幅を表示します。Positionの目標は画像内の正規化座標0–1です。固定の「正解」ではありません。</small></details></section>`);
   $(".remote-record").insertAdjacentHTML("afterend", `<section class="trial-panel"><div class="trial-head"><h2>TRIALS / REPLAY</h2><small id="trialStorage">0 Trial · 0 KB / 500 MB</small></div><div id="trialHistory" class="trial-history">まだTrialはありません</div><p id="trialSummary" class="trial-summary">録画開始〜停止が1 Trialです。データはこのブラウザのメモリに保持され、ページを閉じると消去されます。</p><div class="trial-actions"><button id="exportTrial" type="button" disabled>選択Trial CSV</button><button id="exportAllTrials" type="button" disabled>全Trial CSV</button><button id="deleteAllTrials" type="button" disabled>全Trialを削除</button></div></section>`);
   document.body.insertAdjacentHTML("beforeend", `<section id="experimentReplay" class="replay-modal" role="dialog" aria-label="Trial Replay" hidden><div class="replay-head"><h2 id="replayTitle">Trial Replay</h2><button id="closeExperimentReplay" type="button">閉じる ×</button></div><div class="replay-options">${["video", "skeleton", "trajectory", "numeric", "waveform", "target"].map(key => `<label><input type="checkbox" data-replay-option="${key}" ${["video", "skeleton", "numeric", "waveform", "target"].includes(key) ? "checked" : ""}>${key}</label>`).join("")}</div><details><summary>Replay変数を選択</summary><div class="replay-options">${ANGLES.map(key => `<label><input type="checkbox" data-replay-angle="${key}">${LABELS[key] || key}</label>`).join("")}${POSITIONS.map(key => `<label><input type="checkbox" data-replay-position="${key}">${LABELS[key] || key} position</label>`).join("")}</div></details><div class="replay-grid">${["front", "side"].map(name => `<div class="replay-view" data-replay-view="${name}"><strong>${name.toUpperCase()}</strong><div class="replay-viewport"><video playsinline muted></video><canvas></canvas></div><div class="replay-values"></div></div>`).join("")}</div><div class="replay-controls"><button id="replayPlay" type="button">▶ Play</button><input id="replaySeek" type="range" min="0" max="1000" value="0" aria-label="Replay Seek"><span id="replayTime">0.0 s</span><label>Speed <select id="replaySpeed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option></select></label></div><div class="replay-wave"><canvas data-replay-wave="front"></canvas><canvas data-replay-wave="side"></canvas></div></section>`);
   for (const view of Object.values(views)) {
@@ -36,7 +40,15 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
 
   function liveVisible() { return settings.timing === "concurrent"; }
   function chosenVariables() {
-    return [...settings.angles, ...settings.positions.flatMap(name => [`${name}.x`, `${name}.y`])].slice(0, 3);
+    return [...angleVariables(settings), ...settings.positions.flatMap(name => [`${name}.x`, `${name}.y`])];
+  }
+  function angleTargetKey(key) { return key.startsWith("left.") || key.startsWith("right.") ? key.split(".")[1] : key; }
+  function updateCutoffLimit() {
+    const active = Object.values(live).filter(samples => samples.length >= 4 && performance.now() - samples.at(-1).liveTime < 2000);
+    const limit = active.length ? Math.min(...active.map(estimatedNyquistHz)) : 15;
+    const input = $("#waveCutoffHz"); input.max = String(limit);
+    if (settings.waveCutoffHz > limit) { settings.waveCutoffHz = limit; input.value = String(limit); }
+    $("#waveNyquist").textContent = active.length ? `推定Nyquistの95%: ${limit.toFixed(1)} Hz` : "推定Nyquist: 未計測（上限15 Hz）";
   }
   function snapshot() { return structuredClone(settings); }
   function refreshSettings() {
@@ -46,9 +58,10 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     if (!positionAvailable) { trajectory.checked = false; settings.visuals.trajectory = false; }
     const target = $('[data-visual="target"]'); target.disabled = !settings.angles.length;
     if (!settings.angles.length) { target.checked = false; settings.visuals.target = false; }
-    $("#visualHint").textContent = `Trajectory: ${positionAvailable ? "選択したPosition" : "Positionを選択してください"} / Waveform: 最大3系列`;
+    $("#visualHint").textContent = `Trajectory: ${positionAvailable ? "選択したPosition" : "Positionを選択してください"} / Waveform: 選択系列を表示`;
     $$(".experiment-wave").forEach(root => root.hidden = !(liveVisible() && settings.type === "KP" && settings.visuals.waveform && settings.amount === "detailed" && chosenVariables().length));
     $$('[data-position-target]').forEach(row => row.hidden = !settings.positions.includes(row.dataset.positionTarget));
+    updateCutoffLimit();
     Object.values(views).forEach(view => {
       view.root.classList.toggle("feedback-suppressed", !liveVisible());
       view.root.classList.toggle("camera-video-off", settings.camera === "off");
@@ -63,13 +76,31 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
   $(".experiment-panel").addEventListener("change", event => {
     const el = event.target;
     if (el.dataset.angle) settings.angles = $$('[data-angle]:checked').map(input => input.dataset.angle);
+    if (el.dataset.angleSide) {
+      const selected = $$('[data-angle-side]:checked').map(input => input.dataset.angleSide);
+      if (!selected.length) { el.checked = true; return; }
+      settings.angleSides = selected; settings.angleSide = selected[0]; beepGate.reset();
+    }
     if (el.dataset.position) settings.positions = $$('[data-position]:checked').map(input => input.dataset.position);
     if (el.dataset.visual) settings.visuals[el.dataset.visual] = el.checked;
+    if (el.id === "connectPositions") settings.connectPositions = el.checked;
+    if (el.id === "waveLowPass") settings.waveLowPass = el.checked;
+    if (el.id === "waveCutoffHz") { settings.waveCutoffHz = Math.max(.1, Math.min(+el.max || 15, +el.value || 6)); el.value = String(settings.waveCutoffHz); }
+    if (el.id === "beepView") { settings.beepView = el.value; beepGate.reset(); }
     if (["angleSide", "positionSide", "gaugeDirection"].includes(el.id)) settings[el.id] = el.value;
     if (el.dataset.targetEnabled) settings.targets[el.dataset.targetEnabled].enabled = el.checked;
     if (el.dataset.targetValue) settings.targets[el.dataset.targetValue].value = +el.value;
     if (el.dataset.targetTolerance) settings.targets[el.dataset.targetTolerance].tolerance = Math.max(0, +el.value);
+    if (el.dataset.targetBeep) {
+      settings.targets[el.dataset.targetBeep].beep = el.checked;
+      if (el.checked) unlockAudio().then(() => $("#beepStatus").textContent = "音声の準備ができました").catch(error => $("#beepStatus").textContent = error.message);
+    }
+    if (el.dataset.targetEnabled || el.dataset.targetValue || el.dataset.targetTolerance || el.dataset.targetBeep) beepGate.reset();
     refreshSettings();
+  });
+  $("#testBeep").addEventListener("click", async () => {
+    try { await unlockAudio(); if (beep() === false) throw new Error("音声出力を開始できませんでした"); $("#beepStatus").textContent = "Test Beepを再生しました"; }
+    catch (error) { $("#beepStatus").textContent = error.message; }
   });
   $(".experiment-panel").addEventListener("input", event => {
     const key = event.target.dataset.level;
@@ -93,13 +124,18 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       live[name].push({ ...entry, liveTime: now });
       while (live[name].length > 300 || live[name][0]?.liveTime < now - 10000) live[name].shift();
       if (current) current.samples[name].push(entry);
+      if (name === settings.beepView && liveVisible()) for (const key of angleVariables(settings)) {
+        const target = settings.targets[angleTargetKey(key)];
+        if (beepGate.update(key, sampleValue(entry, key), target, now) && now - lastBeepAudioAt >= 120) { beep(); lastBeepAudioAt = now; }
+      }
     }
+    updateCutoffLimit();
     drawLiveWaves();
   }
   function targetResults(entry, config = settings) {
     if (!entry) return [];
-    return config.angles.filter(key => config.targets[key]?.enabled).map(key => {
-      const target = config.targets[key], value = entry.angles[key], diff = value - target.value;
+    return angleVariables(config).filter(key => config.targets[angleTargetKey(key)]?.enabled).map(key => {
+      const target = config.targets[angleTargetKey(key)], value = sampleValue(entry, key), diff = Number.isFinite(value) ? value - target.value : NaN;
       return { key, value, target: target.value, tolerance: target.tolerance, diff, inside: Number.isFinite(diff) && Math.abs(diff) <= target.tolerance };
     });
   }
@@ -114,7 +150,6 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
   function drawSelectedVariables(ctx, entry, view) {
     if (!entry) return;
     const p = entry.landmarks, width = ctx.canvas.width, height = ctx.canvas.height;
-    const offset = settings.angleSide === "right" ? 1 : 0;
     const point = index => ({ x: p[index].x * width, y: p[index].y * height });
     const label = (text, x, y, color) => {
       ctx.save(); ctx.font = `${Math.max(16, width / 75)}px sans-serif`; ctx.textBaseline = "middle";
@@ -125,13 +160,15 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       else ctx.fillText(text, x, y);
       ctx.restore();
     };
-    settings.angles.forEach((key, index) => {
-      const color = colors[index % colors.length], joints = ANGLE_POINTS[key]?.map(id => point(id + offset));
+    angleVariables(settings).forEach((key, index) => {
+      const side = key.startsWith("right.") ? "right" : key.startsWith("left.") ? "left" : settings.angleSide;
+      const angleKey = angleTargetKey(key), offset = side === "right" ? 1 : 0;
+      const color = colors[index % colors.length], joints = ANGLE_POINTS[angleKey]?.map(id => point(id + offset));
       let first, pivot, last;
       if (joints) [first, pivot, last] = joints;
       else {
-        const shoulder = point(11 + offset), end = key === "headNeck" ? point(7 + offset) : shoulder;
-        pivot = key === "headNeck" ? shoulder : point(23 + offset);
+        const shoulder = point(11 + offset), end = angleKey === "headNeck" ? point(7 + offset) : shoulder;
+        pivot = angleKey === "headNeck" ? shoulder : point(23 + offset);
         first = { x: pivot.x, y: end.y }; last = end;
       }
       ctx.save(); ctx.lineWidth = Math.max(3, width / 350); ctx.strokeStyle = color; ctx.fillStyle = color;
@@ -141,16 +178,23 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       ctx.beginPath(); ctx.arc(pivot.x, pivot.y, Math.max(22, width / 30), a, a + delta, delta < 0); ctx.stroke();
       ctx.beginPath(); ctx.arc(pivot.x, pivot.y, Math.max(5, width / 180), 0, Math.PI * 2); ctx.fill();
       ctx.restore();
-      if (settings.visuals.numeric) label(`${LABELS[key] || key} ${format(entry.angles[key])}°`, pivot.x + 14, pivot.y - 20 - index * 4, color);
+      if (settings.visuals.numeric) label(`${variableLabel(key)} ${format(sampleValue(entry, key))}°`, pivot.x + 14, pivot.y - 20 - index * 4, color);
     });
-    settings.positions.forEach((key, index) => {
-      const position = entry.positions[key]; if (!position) return;
-      const x = position.x * width, y = position.y * height, color = colors[(index + 1) % colors.length];
+    const sides = settings.connectPositions ? settings.angleSides : [settings.positionSide];
+    if (settings.connectPositions) for (const { side, a, b } of selectedPositionSegments(settings.positions, sides)) {
+      const start = positionForSide(p, a, side), end = positionForSide(p, b, side);
+      if (!start || !end) continue;
+      ctx.save(); ctx.strokeStyle = side === "left" ? "#66e1ef" : "#ff9c70"; ctx.lineWidth = Math.max(4, width / 220); ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(start.x * width, start.y * height); ctx.lineTo(end.x * width, end.y * height); ctx.stroke(); ctx.restore();
+    }
+    sides.forEach((side, sideIndex) => settings.positions.forEach((key, index) => {
+      const position = settings.connectPositions ? positionForSide(p, key, side) : entry.positions[key]; if (!position) return;
+      const x = position.x * width, y = position.y * height, color = settings.connectPositions ? side === "left" ? "#66e1ef" : "#ff9c70" : colors[(index + 1) % colors.length];
       ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = Math.max(3, width / 350);
       ctx.beginPath(); ctx.arc(x, y, Math.max(9, width / 110), 0, Math.PI * 2); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(x - 15, y); ctx.lineTo(x + 15, y); ctx.moveTo(x, y - 15); ctx.lineTo(x, y + 15); ctx.stroke(); ctx.restore();
-      if (settings.visuals.numeric) label(`${LABELS[key] || key} X${format(position.x)} Y${format(position.y)}`, x + 18, y + 18, color);
-    });
+      if (settings.visuals.numeric) label(`${settings.connectPositions ? side === "left" ? "Left " : "Right " : ""}${LABELS[key] || key} X${format(position.x)} Y${format(position.y)}`, x + 18, y + 18 + sideIndex * 3, color);
+    }));
   }
   function renderGauges(view, entry) {
     const root = $(".experiment-gauges", view.root);
@@ -169,7 +213,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       }
     }
     for (const card of $$(".gauge-card", root)) {
-      const key = card.dataset.key, gauge = gaugeState(entry, key, settings.targets[key]);
+      const key = card.dataset.key, gauge = gaugeState(entry, key, settings.targets[angleTargetKey(key)]);
       $(".gauge-heading strong", card).textContent = gauge.label;
       $(".gauge-value", card).textContent = settings.visuals.numeric && gauge.valid ? `${format(gauge.value)}${gauge.unit}` : "";
       const track = $(".gauge-track", card);
@@ -203,7 +247,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     const values = $(".experiment-values", view.root), target = $(".experiment-target", view.root);
     values.hidden = !(display && kp && detailed && settings.visuals.numeric);
     values.textContent = entry && !values.hidden ? [
-      ...settings.angles.map(key => `${LABELS[key] || key}: ${format(entry.angles[key])}°`),
+      ...angleVariables(settings).map(key => `${variableLabel(key)}: ${format(sampleValue(entry, key))}°`),
       ...settings.positions.map(key => `${LABELS[key] || key}: X ${format(entry.positions[key]?.x)} / Y ${format(entry.positions[key]?.y)}`)
     ].join("   ·   ") : "";
     const smooth = entry && recent.length >= 3 ? { ...entry, angles: Object.fromEntries(ANGLES.map(key => [key, +(recent.slice(-3).reduce((sum, point) => sum + (point.angles[key] ?? 0), 0) / 3).toFixed(1)])) } : entry;
@@ -211,8 +255,8 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     target.hidden = !(display && settings.visuals.target && results.length);
     target.classList.toggle("outside", results.some(result => !result.inside));
     target.textContent = target.hidden ? "" : settings.amount === "simple" || settings.type === "KR"
-      ? results.map(result => `${LABELS[result.key] || result.key}: ${result.inside ? "Target内" : result.diff > 0 ? "高い" : "低い"}`).join(" / ")
-      : results.map(result => `${LABELS[result.key] || result.key} ${format(result.value)}° / ${result.target}±${result.tolerance}° (Δ${result.diff >= 0 ? "+" : ""}${format(result.diff)}°)`).join("  ·  ");
+      ? results.map(result => `${variableLabel(result.key)}: ${result.inside ? "Target内" : result.diff > 0 ? "高い" : "低い"}`).join(" / ")
+      : results.map(result => `${variableLabel(result.key)} ${format(result.value)}° / ${result.target}±${result.tolerance}° (Δ${result.diff >= 0 ? "+" : ""}${format(result.diff)}°)`).join("  ·  ");
     for (const key of ["knee", "hip", "trunk"]) {
       const bar = $(`[data-bar="${key}"]`, view.root)?.parentElement, targetConfig = settings.targets[key];
       if (!bar) continue;
@@ -234,23 +278,25 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     const width = canvas.clientWidth || 400, height = canvas.clientHeight || 150, dpr = devicePixelRatio || 1;
     canvas.width = width * dpr; canvas.height = height * dpr;
     const ctx = canvas.getContext("2d"); ctx.scale(dpr, dpr); ctx.fillStyle = "#0b0d0f"; ctx.fillRect(0, 0, width, height);
-    const variables = [...config.angles, ...config.positions.flatMap(name => [`${name}.x`, `${name}.y`])].slice(0, 3);
+    const variables = [...angleVariables(config), ...config.positions.flatMap(name => [`${name}.x`, `${name}.y`])];
     if (!samples.length || !variables.length) return;
+    const raw = samples.map(sample => ({ t: sample.t, values: Object.fromEntries(variables.map(key => [key, sampleValue(sample, key)])) }));
+    const displayed = config.waveLowPass ? lowPassSamples(raw, variables, config.waveCutoffHz) : raw;
     const duration = Math.max(1, samples.at(-1).t - samples[0].t), start = samples[0].t;
-    const all = samples.flatMap(sample => variables.map(key => sampleValue(sample, key))).filter(Number.isFinite);
+    const all = displayed.flatMap(sample => variables.map(key => sample.values[key])).filter(Number.isFinite);
     if (!all.length) return;
     let low = Math.min(...all), high = Math.max(...all); if (high === low) { low--; high++; }
     const toY = value => height - 14 - (value - low) / (high - low) * (height - 28);
     variables.forEach((key, index) => {
-      const target = config.targets[key];
+      const target = config.targets[angleTargetKey(key)];
       if (config.visuals.target && target?.enabled) {
         ctx.fillStyle = "#c9ff3920"; const top = toY(target.value + target.tolerance), bottom = toY(target.value - target.tolerance);
         ctx.fillRect(0, top, width, bottom - top); ctx.strokeStyle = "#c9ff3970"; ctx.setLineDash([4, 4]);
         ctx.beginPath(); ctx.moveTo(0, toY(target.value)); ctx.lineTo(width, toY(target.value)); ctx.stroke(); ctx.setLineDash([]);
       }
-      ctx.strokeStyle = colors[index]; ctx.lineWidth = 2; ctx.beginPath(); let first = true;
-      for (const sample of samples) { const value = sampleValue(sample, key); if (value === null) continue; const x = (sample.t - start) / duration * width; first ? ctx.moveTo(x, toY(value)) : ctx.lineTo(x, toY(value)); first = false; }
-      ctx.stroke(); ctx.fillStyle = colors[index]; ctx.font = "10px sans-serif"; ctx.fillText(key, 8, 13 + index * 12);
+      ctx.strokeStyle = colors[index % colors.length]; ctx.lineWidth = 2; ctx.beginPath(); let first = true;
+      for (const sample of displayed) { const value = sample.values[key]; if (!Number.isFinite(value)) continue; const x = (sample.t - start) / duration * width; first ? ctx.moveTo(x, toY(value)) : ctx.lineTo(x, toY(value)); first = false; }
+      ctx.stroke(); ctx.fillStyle = colors[index % colors.length]; ctx.font = "10px sans-serif"; ctx.fillText(variableLabel(key), 8, 13 + index * 12);
     });
     if (cursor !== null) { ctx.strokeStyle = "#fff"; ctx.beginPath(); ctx.moveTo(Math.max(0, Math.min(width, (cursor - start) / duration * width)), 0); ctx.lineTo(Math.max(0, Math.min(width, (cursor - start) / duration * width)), height); ctx.stroke(); }
   }
@@ -260,6 +306,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
   }
   function beginTrial() {
     live.front = []; live.side = [];
+    beepGate.reset();
     current = { id: nextId++, timestamp: new Date().toISOString(), start: performance.now(), settings: snapshot(), sources: { front: views.front.source, side: views.side.source }, samples: { front: [], side: [] } };
     $("#trialSummary").textContent = `Trial ${String(current.id).padStart(2, "0")} 計測中。${settings.timing === "terminal" ? "終了後にFeedbackを提示します。" : ""}`;
     $(".experiment-panel").inert = true;
@@ -273,7 +320,7 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     const duration = (trial.duration / 1000).toFixed(1);
     const results = Object.entries(trial.samples).map(([name, samples]) => {
       const entry = representative(samples), targets = targetResults(entry, trial.settings);
-      return `${name.toUpperCase()}: ${entry ? `最深部 Knee ${format(entry.angles.knee)}°` : "Pose未検出"}${targets.length ? ` / ${targets.map(target => `${LABELS[target.key] || target.key} ${target.inside ? "Target内" : "Target外"} (Δ${format(target.diff)}°)`).join(" · ")}` : ""}`;
+      return `${name.toUpperCase()}: ${entry ? `最深部 Knee ${format(entry.angles.knee)}°` : "Pose未検出"}${targets.length ? ` / ${targets.map(target => `${variableLabel(target.key)} ${target.inside ? "Target内" : "Target外"} (Δ${format(target.diff)}°)`).join(" · ")}` : ""}`;
     });
     return `Trial ${String(trial.id).padStart(2, "0")} · ${duration} s · ${results.join(" | ")}`;
   }
@@ -322,8 +369,10 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     for (const view of ["front", "side"]) for (const sample of trial.samples[view]) {
       rows.push({ trial_id: trial.id, timestamp: trial.timestamp, view, source: trial.sources[view], time_ms: Math.round(sample.t),
         ...Object.fromEntries(ANGLES.map(key => [key, sample.angles[key]])),
+        ...Object.fromEntries(["left", "right"].flatMap(side => BILATERAL_ANGLES.map(key => [`${side}_${key}`, sample.anglesBySide?.[side]?.[key]]))),
         ...Object.fromEntries(POSITIONS.flatMap(key => [[`${key}_x`, sample.positions[key]?.x], [`${key}_y`, sample.positions[key]?.y]])),
-        angle_side: trial.settings.angleSide, position_side: trial.settings.positionSide,
+        angle_side: trial.settings.angleSide, angle_sides: trial.settings.angleSides || [trial.settings.angleSide], position_side: trial.settings.positionSide,
+        connect_positions: trial.settings.connectPositions, wave_low_pass: trial.settings.waveLowPass, wave_cutoff_hz: trial.settings.waveCutoffHz, beep_view: trial.settings.beepView,
         feedback_timing: trial.settings.timing, feedback_type: trial.settings.type, feedback_amount: trial.settings.amount,
         selected_angles: trial.settings.angles, selected_positions: trial.settings.positions, visualizations: trial.settings.visuals,
         targets: trial.settings.targets, landmarks: sample.landmarks });
@@ -363,11 +412,11 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
       canvas.width = video.videoWidth || 1280; canvas.height = video.videoHeight || 720;
       viewport.classList.toggle("skeleton-only", !options.video);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (sample && options.skeleton) draw(canvas, sample.landmarks);
+      if (sample && options.skeleton) draw(canvas, sample.landmarks, { lineLevel: replayConfig.skeletonWidth, markerLevel: replayConfig.markerSize });
       if (sample && options.trajectory) drawTrail(ctx, replayTrial.samples[name], time, replayConfig);
       const results = options.target ? targetResults(sample, replayConfig) : [];
       $(".replay-values", root).textContent = sample && options.numeric
-        ? [...replayConfig.angles.map(key => `${LABELS[key] || key} ${format(sample.angles[key])}°`), ...replayConfig.positions.map(key => `${key} X${format(sample.positions[key]?.x)} Y${format(sample.positions[key]?.y)}`), ...results.map(result => `${result.key} Δ${format(result.diff)}° ${result.inside ? "Target内" : "Target外"}`)].join(" · ") : "";
+        ? [...angleVariables(replayConfig).map(key => `${variableLabel(key)} ${format(sampleValue(sample, key))}°`), ...replayConfig.positions.map(key => `${key} X${format(sample.positions[key]?.x)} Y${format(sample.positions[key]?.y)}`), ...results.map(result => `${variableLabel(result.key)} Δ${format(result.diff)}° ${result.inside ? "Target内" : "Target外"}`)].join(" · ") : "";
       const waveCanvas = $(`[data-replay-wave="${name}"]`); waveCanvas.hidden = !options.waveform;
       if (options.waveform) wave(waveCanvas, replayTrial.samples[name], { ...replayConfig, visuals: { ...replayConfig.visuals, target: options.target } }, time);
     }
@@ -435,6 +484,6 @@ export function createExperiment({ views, sourceState, onSettingsChange }) {
     $("#replaySeek").value = Math.round(ratio * 1000); $("#replaySeek").dispatchEvent(new Event("input"));
   });
   refreshSettings(); renderHistory();
-  function sourceChanged() { live.front = []; live.side = []; refreshSettings(); }
-  return { sample, decorate, beginTrial, endTrial, liveVisible, settings, refreshSettings, sourceChanged, openReplay };
+  function sourceChanged() { live.front = []; live.side = []; beepGate.reset(); refreshSettings(); }
+  return { sample, decorate, beginTrial, endTrial, liveVisible, settings, refreshSettings, sourceChanged, openReplay, csvRows };
 }

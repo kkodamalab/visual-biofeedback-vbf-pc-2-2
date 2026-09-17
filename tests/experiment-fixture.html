@@ -6,19 +6,25 @@
 <script type="module">
 import { createExperiment } from "../src/experiment.js";
 try {
+  let beepCount = 0;
   const views = Object.fromEntries(["front", "side"].map(name => {
     const root = document.querySelector(`[data-view=${name}]`);
     return [name, { root, video: root.querySelector("video"), canvas: root.querySelector("canvas"), source: name === "front" ? "A" : "B" }];
   }));
-  const experiment = createExperiment({ views, sourceState: () => ({ stream: null, landmarks: null }), onSettingsChange: () => {} });
+  const experiment = createExperiment({ views, sourceState: () => ({ stream: null, landmarks: null }), onSettingsChange: () => {}, beep: () => { beepCount++; return true; }, unlockAudio: async () => {} });
   const points = Array.from({ length: 33 }, (_, index) => ({ x: .3 + index / 100, y: .2 + index / 120, z: 0, visibility: 1 }));
   experiment.sample("A", points); experiment.sample("B", points); experiment.refreshSettings();
   document.querySelector('[data-visual="gauge"]').click();
   const frontGauges = views.front.root.querySelector('.experiment-gauges');
   if (frontGauges.hidden || frontGauges.querySelectorAll('.gauge-card').length !== 3 || views.side.root.querySelector('.experiment-gauges').hidden) throw new Error("Selected angle gauges did not appear on both views");
-  if (!frontGauges.querySelector('[data-key="knee"] .gauge-status').textContent.includes('高い')) throw new Error("Knee gauge did not compare with target");
+  if (!frontGauges.querySelector('[data-key="left.knee"] .gauge-status').textContent.includes('高い')) throw new Error("Knee gauge did not compare with target");
   const kneeTarget = document.querySelector('[data-target-value="knee"]'); kneeTarget.value = "180"; kneeTarget.dispatchEvent(new Event("change", { bubbles: true }));
-  if (!frontGauges.querySelector('[data-key="knee"]').classList.contains('inside')) throw new Error("Knee gauge target zone did not update immediately");
+  if (!frontGauges.querySelector('[data-key="left.knee"]').classList.contains('inside')) throw new Error("Knee gauge target zone did not update immediately");
+  document.querySelector('[data-angle-side="right"]').click();
+  if (experiment.settings.angleSides.length !== 2 || !frontGauges.querySelector('[data-key="right.knee"]') || frontGauges.querySelectorAll('.gauge-card').length !== 5) throw new Error("Left/Right angles were not displayed together");
+  const sampleForCsv = { t: 0, ...await import('../src/experiment-math.js').then(module => module.evaluate(points)), landmarks: points };
+  const csv = experiment.csvRows({ id: 1, timestamp: 'test', sources: { front: 'A', side: 'B' }, samples: { front: [sampleForCsv], side: [] }, settings: experiment.settings });
+  if (!('left_knee' in csv[0]) || !('right_knee' in csv[0]) || !csv[0].angle_sides.includes('right')) throw new Error("CSV did not retain both angle sides");
   const direction = document.querySelector('#gaugeDirection'); direction.value = 'vertical'; direction.dispatchEvent(new Event('change', { bubbles: true }));
   if (frontGauges.dataset.direction !== 'vertical') throw new Error("Gauge orientation did not switch");
   direction.value = 'horizontal'; direction.dispatchEvent(new Event('change', { bubbles: true }));
@@ -50,10 +56,31 @@ try {
   if (checksum(views.front.canvas) === skeletonOn) throw new Error("Video ON forced skeleton back on");
   document.querySelector('[data-visual="skeleton"]').click();
   document.querySelector('[data-position="hip"]').click();
+  document.querySelector('[data-position="shoulder"]').click();
+  document.querySelector('[data-position="knee"]').click();
   if (document.querySelector('[data-visual="trajectory"]').disabled) throw new Error("Trajectory remained disabled");
+  document.querySelector('[data-visual="skeleton"]').click();
+  const dotsOnly = checksum(views.front.canvas);
+  document.querySelector('#connectPositions').click();
+  if (!experiment.settings.connectPositions || checksum(views.front.canvas) === dotsOnly) throw new Error("Position connections did not draw independently of skeleton");
+  document.querySelector('[data-visual="skeleton"]').click();
+  document.querySelector('#connectPositions').click();
   document.querySelector('[data-visual="gauge"]').click();
   if (document.querySelector('[data-position-target="hip"]').hidden || !frontGauges.querySelector('[data-key="hip.x"]')) throw new Error("Selected position gauges were not added");
   document.querySelector('[data-visual="gauge"]').click();
+  document.querySelector('#waveLowPass').click();
+  if (!experiment.settings.waveLowPass) throw new Error("Low-pass checkbox did not update settings");
+  document.querySelector('#waveLowPass').click();
+  document.querySelector('#testBeep').click();
+  await Promise.resolve();
+  if (beepCount !== 1) throw new Error("Test Beep did not play");
+  document.querySelector('[data-target-beep="knee"]').click();
+  await Promise.resolve();
+  experiment.sample("B", points); experiment.sample("B", points);
+  if (beepCount !== 2) throw new Error("Target entry did not beep once");
+  experiment.sample("B", points); experiment.sample("B", points);
+  if (beepCount !== 2) throw new Error("Target zone continuously beeped");
+  document.querySelector('[data-target-beep="knee"]').click();
   document.querySelector('[data-group="timing"] [data-value="terminal"]').click();
   for (let i = 0; i < 3; i++) {
     experiment.beginTrial(); experiment.sample("A", points); experiment.sample("B", points); await new Promise(resolve => setTimeout(resolve, 10)); experiment.endTrial({});
@@ -79,7 +106,7 @@ try {
   document.querySelector('[data-visual="gauge"]').click();
   document.querySelector('[data-visual="waveform"]').click();
   experiment.sample("A", points); experiment.sample("B", points); experiment.refreshSettings();
-  if (frontGauges.hidden || frontGauges.querySelector('[data-key="knee"]').classList.contains('no-value') || views.front.root.querySelector('.experiment-wave').hidden) throw new Error("Gauge and waveform did not coexist during live feedback");
-  document.querySelector("#result").textContent = "PASS: gauges and target zones, independent video/skeleton/variables, 5-level widths, per-view waveform, older replay, waveform/seek, No BF, 10-Trial cap";
+  if (frontGauges.hidden || frontGauges.querySelector('[data-key="left.knee"]').classList.contains('no-value') || views.front.root.querySelector('.experiment-wave').hidden) throw new Error("Gauge and waveform did not coexist during live feedback");
+  document.querySelector("#result").textContent = "PASS: bilateral angles/CSV, position connections, filter switch, beep, gauges, waveform, older replay, No BF, 10-Trial cap";
 } catch (error) { document.querySelector("#result").textContent = `FAIL: ${error.stack || error}`; }
 </script></body></html>

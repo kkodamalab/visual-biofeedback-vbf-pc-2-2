@@ -1,4 +1,5 @@
 export const ANGLES = ["knee", "hip", "ankle", "trunk", "headNeck"];
+export const BILATERAL_ANGLES = ["knee", "hip", "ankle"];
 export const POSITIONS = ["head", "shoulder", "hip", "knee", "ankle", "wrist", "foot"];
 export const LABELS = { knee: "Knee", hip: "Hip", ankle: "Ankle", trunk: "Trunk", headNeck: "Head / Neck", head: "Head", shoulder: "Shoulder", wrist: "Wrist", foot: "Foot" };
 const PAIRS = { head: [7, 8], shoulder: [11, 12], hip: [23, 24], knee: [25, 26], ankle: [27, 28], wrist: [15, 16], foot: [31, 32] };
@@ -28,13 +29,22 @@ export function angles(landmarks, side = "left", aspect = 1) {
   ].map(([key, value]) => [key, Number.isFinite(value) ? +value.toFixed(1) : null]));
 }
 export function evaluate(landmarks, side = "left", positionSide = "midpoint", aspect = 1) {
-  const a = angles(landmarks, side, aspect);
+  const bySide = { left: angles(landmarks, "left", aspect), right: angles(landmarks, "right", aspect) };
+  const a = bySide[side];
   if (!a) return null;
-  return { angles: a, positions: Object.fromEntries(POSITIONS.map(name => [name, position(landmarks, name, positionSide)])) };
+  return { angles: a, anglesBySide: bySide, positions: Object.fromEntries(POSITIONS.map(name => [name, position(landmarks, name, positionSide)])) };
+}
+export function angleVariables(config) {
+  const sides = config.angleSides?.length ? config.angleSides : [config.angleSide || "left"];
+  return config.angles.flatMap(key => BILATERAL_ANGLES.includes(key) ? sides.map(side => `${side}.${key}`) : [key]);
+}
+export function variableLabel(key) {
+  const [side, angle] = key.split(".");
+  return side === "left" || side === "right" ? `${side === "left" ? "Left" : "Right"} ${LABELS[angle] || angle}` : LABELS[key] || key;
 }
 export function sampleValue(sample, variable) {
   if (!sample) return null;
   const [name, coordinate] = variable.split(".");
-  const value = coordinate ? sample.positions?.[name]?.[coordinate] : sample.angles?.[name];
+  const value = name === "left" || name === "right" ? sample.anglesBySide?.[name]?.[coordinate] : coordinate ? sample.positions?.[name]?.[coordinate] : sample.angles?.[name];
   return Number.isFinite(value) ? value : null;
 }

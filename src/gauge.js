@@ -1,11 +1,11 @@
-import { LABELS, sampleValue } from "./experiment-math.js";
+import { angleVariables, variableLabel, sampleValue } from "./experiment-math.js";
 
 export function gaugeVariables(settings) {
-  return [...settings.angles, ...settings.positions.flatMap(name => [`${name}.x`, `${name}.y`])];
+  return [...angleVariables(settings), ...settings.positions.flatMap(name => [`${name}.x`, `${name}.y`])];
 }
 
 export function gaugeState(sample, key, target) {
-  const position = key.includes(".");
+  const position = key.endsWith(".x") || key.endsWith(".y");
   const max = position ? 1 : ["trunk", "headNeck"].includes(key) ? 90 : 180;
   const value = sampleValue(sample, key);
   const valid = Number.isFinite(value);
@@ -13,7 +13,7 @@ export function gaugeState(sample, key, target) {
   const tolerance = Math.max(0, target?.tolerance || 0);
   const clamped = number => Math.max(0, Math.min(100, number / max * 100));
   return {
-    key, label: position ? `${LABELS[key.split(".")[0]] || key.split(".")[0]} ${key.endsWith(".x") ? "X" : "Y"}` : LABELS[key] || key,
+    key, label: position ? `${variableLabel(key.split(".")[0])} ${key.endsWith(".x") ? "X" : "Y"}` : variableLabel(key),
     max, unit: position ? "" : "°", value, valid, targetEnabled,
     currentPercent: valid ? clamped(value) : 0,
     targetPercent: targetEnabled ? clamped(target.value) : 0,

@@ -13,7 +13,7 @@ test("angle gauge maps current and target to a common degree scale", () => {
 
 test("position gauges use normalized 0–1 and do not claim success without a target", () => {
   const sample = { positions: { hip: { x: .4, y: .6 } } };
-  assert.deepEqual(gaugeVariables({ angles: ["knee"], positions: ["hip"] }), ["knee", "hip.x", "hip.y"]);
+  assert.deepEqual(gaugeVariables({ angles: ["knee"], angleSides: ["left", "right"], positions: ["hip"] }), ["left.knee", "right.knee", "hip.x", "hip.y"]);
   assert.equal(gaugeState(sample, "hip.x", { enabled: true, value: .4, tolerance: .05 }).inside, true);
   assert.equal(gaugeState(sample, "hip.y", { enabled: false, value: .6, tolerance: .05 }).inside, false);
   assert.equal(gaugeState(sample, "hip.y", { enabled: false, value: .6, tolerance: .05 }).currentPercent, 60);
